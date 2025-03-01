@@ -225,6 +225,84 @@ module Errgonomic
     end
   end
 
+  module Option
+    class Any
+
+      # return true if the contained value is Some and the block returns truthy
+      def some_and(&block)
+        return false if none?
+        !! block.call(self.value)
+      end
+
+      # return true if the contained value is None or the block returns truthy
+      def none_or(&block)
+        return true if none?
+        !! block.call(self.value)
+      end
+
+      # return an Array with the contained value, if any
+      def to_a
+        return [] if none?
+        [value]
+      end
+
+      # returns the inner value if present, else raises an error
+      def unwrap!(message)
+        raise Errgonomic::UnwrapError, "cannot unwrap None" if none?
+        value
+      end
+
+      # returns the inner value if pressent, else raises an error with the given message
+      def expect!(message)
+        raise Errgonomic::ExpectError, message if none?
+        value
+      end
+
+      # returns the inner value if present, else returns the default value
+      def unwrap_or(default)
+        return default if none?
+        value
+      end
+
+      # returns the inner value if present, else returns the result of the provided block
+      def unwrap_or_else(&block)
+        return block.call if none?
+        value
+      end
+
+      # TODO: figure out an appropriate name for this one. rust calls it
+      # "inspect" but in Ruby that's closer to to_s of a debug string. in Ruby
+      # the semantic here is tap, but that takes the original object, and this
+      # one is more specifically an inner value if it exists, which I am
+      # hesitant to replace.
+      #
+      # Calls a function with the inner value, if Some, but returns the original option.
+      def tap_some(&block)
+        block.call(value) if some?
+        self
+      end
+
+      def map_or(default, &block)
+        return default if none?
+        block.call(value)
+      end
+
+    end
+
+    class Some < Any
+      attr_accessor :value
+      def initialize(value)
+        @value = value
+      end
+      def some?; true; end
+      def none?; false; end
+    end
+    class None < Any
+      def some?; false; end
+      def none?; true; end
+    end
+  end
+
   def self.give_me_ambiguous_downstream_errors?
     @give_me_ambiguous_downstream_errors ||= false
   end
@@ -246,6 +324,14 @@ end
 
 def Err(value)
   Errgonomic::Result::Err.new(value)
+end
+
+def Some(value)
+  Errgonomic::Option::Some.new(value)
+end
+
+def None()
+  Errgonomic::Option::None.new()
 end
 
 class Object
