@@ -284,90 +284,90 @@ RSpec.describe Errgonomic do
     end
   end
 
-  describe "Option" do
-    describe "some" do
-      it "can be created with Some()" do
+  describe 'Option' do
+    describe 'some' do
+      it 'can be created with Some()' do
         expect(Some(:foo)).to be_a(Errgonomic::Option::Some)
       end
-      it "is some" do
+      it 'is some' do
         expect(Some(:foo)).to be_some
       end
-      it "is not none" do
+      it 'is not none' do
         expect(Some(:foo)).not_to be_none
       end
     end
 
-    describe "None" do
-      it "can be created with None()" do
+    describe 'None' do
+      it 'can be created with None()' do
         expect(None()).to be_a(Errgonomic::Option::None)
       end
-      it "is none" do
+      it 'is none' do
         expect(None()).to be_none
       end
-      it "is not some" do
+      it 'is not some' do
         expect(None()).not_to be_some
       end
     end
 
-    describe "some_and" do
-      it "returns true if the option is Some and the block is truthy" do
+    describe 'some_and' do
+      it 'returns true if the option is Some and the block is truthy' do
         expect(Some(:foo).some_and { true }).to be true
         expect(Some(:foo).some_and { false }).to be false
       end
-      it "returns false if the option is None" do
+      it 'returns false if the option is None' do
         expect(None().some_and { true }).to be false
         expect(None().some_and { false }).to be false
       end
     end
 
-    describe "none_or" do
-      it "returns true if the option is None" do
+    describe 'none_or' do
+      it 'returns true if the option is None' do
         expect(None().none_or { true }).to be true
         expect(None().none_or { false }).to be true
       end
-      it "returns true if the block is truthy" do
+      it 'returns true if the block is truthy' do
         expect(Some(:foo).none_or { true }).to be true
         expect(Some(:foo).none_or { false }).to be false
       end
     end
 
-    describe "to_a" do
-      it "returns an array of the contained value, if any" do
+    describe 'to_a' do
+      it 'returns an array of the contained value, if any' do
         expect(Some(:foo).to_a).to eq([:foo])
         expect(None().to_a).to eq([])
       end
     end
 
-    describe "expect!" do
-      it "returns the inner value or else raises an error with the given message" do
-        expect(Some(:foo).expect!("msg")).to eq(:foo)
-        expect { None().expect!("msg") }.to raise_error(Errgonomic::ExpectError, "msg")
+    describe 'expect!' do
+      it 'returns the inner value or else raises an error with the given message' do
+        expect(Some(:foo).expect!('msg')).to eq(:foo)
+        expect { None().expect!('msg') }.to raise_error(Errgonomic::ExpectError, 'msg')
       end
     end
 
-    describe "unwrap!" do
-      it "returns the inner value or else raises an error" do
-        expect(Some(:foo).unwrap!("foo")).to eq(:foo)
-        expect { None().unwrap!("foo") }.to raise_error(Errgonomic::UnwrapError)
+    describe 'unwrap!' do
+      it 'returns the inner value or else raises an error' do
+        expect(Some(:foo).unwrap!).to eq(:foo)
+        expect { None().unwrap! }.to raise_error(Errgonomic::UnwrapError)
       end
     end
 
-    describe "unwrap_or" do
-      it "returns the inner value if present, or the provided value" do
+    describe 'unwrap_or' do
+      it 'returns the inner value if present, or the provided value' do
         expect(Some(:foo).unwrap_or(:bar)).to eq(:foo)
         expect(None().unwrap_or(:bar)).to eq(:bar)
       end
     end
 
-    describe "unwrap_or_else" do
-      it "returns the inner value if present, or the result of the provided block" do
+    describe 'unwrap_or_else' do
+      it 'returns the inner value if present, or the result of the provided block' do
         expect(Some(:foo).unwrap_or_else { :bar }).to eq(:foo)
         expect(None().unwrap_or_else { :bar }).to eq(:bar)
       end
     end
 
-    describe "tap_some" do
-      it "calls the block with the inner value, if some, returning the original Option" do
+    describe 'tap_some' do
+      it 'calls the block with the inner value, if some, returning the original Option' do
         option = Some(:foo)
         tapped = false
         expect(option.tap_some { |v| tapped = true }).to eq(option)
@@ -379,39 +379,39 @@ RSpec.describe Errgonomic do
       end
     end
 
-    describe "map"
+    describe 'map'
 
-    describe "map_or" do
-      it "returns the provided result (if None) or applies a function to the contained value (if Some)" do
+    describe 'map_or' do
+      it 'returns the provided result (if None) or applies a function to the contained value (if Some)' do
         option = Some(0)
         val = option.map_or(100) { |v| v + 1 }
         expect(val).to eq(1)
       end
     end
 
-    describe "map_or_else"
+    describe 'map_or_else'
 
-    describe "ok_or"
-    describe "ok_or_else"
+    describe 'ok_or'
+    describe 'ok_or_else'
 
-    describe "and"
-    describe "and_then"
+    describe 'and'
+    describe 'and_then'
 
-    describe "filter"
+    describe 'filter'
 
-    describe "or"
-    describe "or_else"
-    describe "xor"
+    describe 'or'
+    describe 'or_else'
+    describe 'xor'
 
-    describe "insert"
-    describe "get_or_insert"
-    describe "get_or_insert_with"
+    describe 'insert'
+    describe 'get_or_insert'
+    describe 'get_or_insert_with'
 
-    describe "take"
-    describe "take_if"
-    describe "replace"
+    describe 'take'
+    describe 'take_if'
+    describe 'replace'
 
-    describe "zip"
-    describe "zip_with"
+    describe 'zip'
+    describe 'zip_with'
   end
 end
