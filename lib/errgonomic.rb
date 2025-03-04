@@ -1,14 +1,17 @@
 # frozen_string_literal: true
 
-require_relative "errgonomic/version"
+require_relative 'errgonomic/version'
 
 # The semantics here borrow heavily from ActiveSupport. Let's prefer that if
 # loaded, otherwise just copypasta the bits we like. Or convince me to make that
 # gem a dependency.
-if !Object.methods.include?(:blank?)
-  require_relative "errgonomic/core_ext/blank"
-end
+require_relative 'errgonomic/core_ext/blank' unless Object.methods.include?(:blank?)
 
+# Introduce certain helper methods into the Object class.
+#
+# @example
+#   "foo".result? # => false
+#   "foo".assert_result! # => raise Errgonomic::ResultRequiredError
 class Object
   # Convenience method to indicate whether we are working with a result.
   # TBD whether we implement some stubs for the rest of the Result API; I want
@@ -29,10 +32,16 @@ class Object
   #   Ok("foo").assert_result! # => true
   def assert_result!
     return true if result?
+
     raise Errgonomic::ResultRequiredError
   end
 end
 
+# Errgonomic adds opinionated abstractions to handle errors in a way that blends
+# Rust and Ruby ergonomics. This library leans on Rails conventions for some
+# presence-related methods; when in doubt, make those feel like Rails. It also
+# has an implementation of Option and Result; when in doubt, make those feel
+# more like Rust.
 module Errgonomic
   class Error < StandardError; end
 
@@ -49,7 +58,16 @@ module Errgonomic
   class ResultRequiredError < Error; end
 
   module Result
+    # The base class for Result's Ok and Err class variants. We implement as
+    # much logic as possible here, and let Ok and Err handle their
+    # initialization and self identification.
     class Any
+      attr_reader :value
+
+      def initialize(value)
+        @value = value
+      end
+
       # Equality comparison for Result objects is based on value not reference.
       #
       # @example
@@ -127,11 +145,9 @@ module Errgonomic
       #   Ok("foo").unwrap! # => "foo"
       #   Err("foo").unwrap! # => raise Errgonomic::UnwrapError, "value is an Err"
       def unwrap!
-        if ok?
-          @value
-        else
-          raise Errgonomic::UnwrapError, "value is an Err"
-        end
+        raise Errgonomic::UnwrapError, 'value is an Err' unless ok?
+
+        @value
       end
 
       # Return the inner value of an Ok, else raise an exception with the given
@@ -141,11 +157,9 @@ module Errgonomic
       #   Ok("foo").expect!("foo") # => "foo"
       #   Err("foo").expect!("foo") # => raise Errgonomic::ExpectError, "foo"
       def expect!(msg)
-        if ok?
-          @value
-        else
-          raise Errgonomic::ExpectError, msg
-        end
+        raise Errgonomic::ExpectError, msg unless ok?
+
+        @value
       end
 
       # Return the inner value of an Err, else raise an exception when Ok.
@@ -154,11 +168,9 @@ module Errgonomic
       #   Ok("foo").unwrap_err! # => raise Errgonomic::UnwrapError, "value is an Ok"
       #   Err("foo").unwrap_err! # => "foo"
       def unwrap_err!
-        if err?
-          @value
-        else
-          raise Errgonomic::UnwrapError, "value is an Ok"
-        end
+        raise Errgonomic::UnwrapError, 'value is an Ok' unless err?
+
+        @value
       end
 
       # Given another result, return it if the inner result is Ok, else return
@@ -171,8 +183,9 @@ module Errgonomic
       #   Err("foo").and(Err("bar")) # => Err("foo")
       #   Ok("foo").and("bar") # => raise Errgonomic::ArgumentError, "other must be a Result"
       def and(other)
-        raise Errgonomic::ArgumentError, "other must be a Result" unless other.is_a?(Errgonomic::Result::Any)
+        raise Errgonomic::ArgumentError, 'other must be a Result' unless other.is_a?(Errgonomic::Result::Any)
         return self if err?
+
         other
       end
 
@@ -184,10 +197,12 @@ module Errgonomic
       def and_then(&block)
         # raise NotImplementedError, "and_then is not implemented yet"
         return self if err?
+
         res = block.call(self)
         unless res.is_a?(Errgonomic::Result::Any) || Errgonomic.give_me_ambiguous_downstream_errors?
-          raise Errgonomic::ArgumentError, "and_then block must return a Result"
+          raise Errgonomic::ArgumentError, 'and_then block must return a Result'
         end
+
         res
       end
 
@@ -199,8 +214,12 @@ module Errgonomic
       #   Err("foo").or(Err("baz")) # => Err("baz")
       #   Err("foo").or("bar") # => raise Errgonomic::ArgumentError, "other must be a Result; you might want unwrap_or"
       def or(other)
-        raise Errgonomic::ArgumentError, "other must be a Result; you might want unwrap_or" unless other.is_a?(Errgonomic::Result::Any)
+        unless other.is_a?(Errgonomic::Result::Any)
+          raise Errgonomic::ArgumentError,
+                'other must be a Result; you might want unwrap_or'
+        end
         return other if err?
+
         self
       end
 
@@ -216,10 +235,12 @@ module Errgonomic
       #   Err("foo").or_else { "bar" } # => raise Errgonomic::ArgumentError, "or_else block must return a Result"
       def or_else(&block)
         return self if ok?
+
         res = block.call(self)
         unless res.is_a?(Errgonomic::Result::Any) || Errgonomic.give_me_ambiguous_downstream_errors?
-          raise Errgonomic::ArgumentError, "or_else block must return a Result"
+          raise Errgonomic::ArgumentError, 'or_else block must return a Result'
         end
+
         res
       end
 
@@ -230,6 +251,7 @@ module Errgonomic
       #   Err("foo").unwrap_or("bar") # => "bar"
       def unwrap_or(other)
         return value if ok?
+
         other
       end
 
@@ -241,16 +263,14 @@ module Errgonomic
       #   Err("foo").unwrap_or_else { "bar" } # => "bar"
       def unwrap_or_else(&block)
         return value if ok?
+
         block.call(self)
       end
     end
 
+    # The Ok variant.
     class Ok < Any
       attr_accessor :value
-
-      def initialize(value)
-        @value = value
-      end
 
       # Ok is always ok
       #
@@ -280,7 +300,7 @@ module Errgonomic
       #   Err("foo").value # => "foo"
       #   Err().value # => Arbitrary
       def initialize(value = Arbitrary)
-        @value = value
+        super(value)
       end
 
       # Err is always err
@@ -333,7 +353,7 @@ module Errgonomic
         when Ok
           @ok_block.call(@result.value)
         else
-          raise Errgonomic::MatcherError, "invalid matcher"
+          raise Errgonomic::MatcherError, 'invalid matcher'
         end
       end
     end
@@ -344,6 +364,7 @@ module Errgonomic
       def ==(other)
         return true if none? && other.none?
         return true if some? && other.some? && value == other.value
+
         false
       end
 
@@ -377,6 +398,7 @@ module Errgonomic
       #   None().to_a # => []
       def to_a
         return [] if none?
+
         [value]
       end
 
@@ -536,6 +558,7 @@ module Errgonomic
 
     class Some < Any
       attr_accessor :value
+
       def initialize(value)
         @value = value
       end
@@ -600,6 +623,7 @@ class Object
   # @return [Object] The receiver if it is present, otherwise raises a NotPresentError.
   def present_or_raise(message)
     raise Errgonomic::NotPresentError, message if blank?
+
     self
   end
 
@@ -612,7 +636,8 @@ class Object
   def present_or(value)
     # TBD whether this is *too* strict
     if value.class != self.class && self.class != NilClass
-      raise Errgonomic::TypeMismatchError, "Type mismatch: default value is a #{value.class} but original was a #{self.class}"
+      raise Errgonomic::TypeMismatchError,
+            "Type mismatch: default value is a #{value.class} but original was a #{self.class}"
     end
 
     return self if present?
@@ -628,6 +653,7 @@ class Object
   # @return [Object] The receiver if it is present, otherwise the result of the block.
   def present_or_else(&block)
     return block.call if blank?
+
     self
   end
 
