@@ -15,13 +15,6 @@
         "aarch64-darwin"
       ];
       overlays = [
-        (final: prev: {
-          gems = final.bundlerEnv {
-            name = "errgonomic";
-            gemdir = ./.;
-            # src = final.lib.cleanSource ../.;
-          };
-        })
       ];
       forAllSystems =
         f:
@@ -36,12 +29,25 @@
     {
       devShells = forAllSystems (
         { pkgs, ... }:
+        let
+          inherit (pkgs) ruby bundix;
+        in
         {
           default = pkgs.mkShell {
             buildInputs = [
-              pkgs.ruby
-              pkgs.bundix
-              pkgs.gems
+              ruby
+              bundix
+              (pkgs.bundlerEnv {
+                name = "errgonomic";
+                gemdir = ./.;
+                extraConfigPaths = [
+                  ./errgonomic.gemspec
+                  ./lib/errgonomic/version.rb
+                ];
+                postInstall = ''
+                  find . >&2
+                '';
+              })
             ];
           };
         }

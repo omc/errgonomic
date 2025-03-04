@@ -1,6 +1,12 @@
 # frozen_string_literal: true
 
-require_relative "lib/errgonomic/version"
+# when we build in the nix store, version.rb is hashed and adjacent to the gemspec
+if __FILE__.include?("/nix/store")
+  version_file = Dir.glob("./*-version.rb").first
+  require_relative version_file
+else
+  require_relative "lib/errgonomic/version"
+end
 
 Gem::Specification.new do |spec|
   spec.name = "errgonomic"
@@ -34,6 +40,8 @@ Gem::Specification.new do |spec|
   # spec.add_dependency "example-gem", "~> 1.0"
 
   spec.add_dependency "concurrent-ruby", "~> 1.0"
+  spec.add_development_dependency "yard", "~> 0.9"
+  spec.add_development_dependency "yard-doctest", "~> 0.1"
 
   # For more information and examples about making a new gem, check out our
   # guide at: https://bundler.io/guides/creating_gem.html
