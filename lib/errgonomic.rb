@@ -50,7 +50,6 @@ module Errgonomic
 
   module Result
     class Any
-
       # Equality comparison for Result objects is based on value not reference.
       #
       # @example
@@ -58,7 +57,7 @@ module Errgonomic
       #   Ok("foo") == Err("foo") # => false
       #   Ok("foo").object_id != Ok("foo").object_id # => true
       def ==(other)
-        self.class == other.class && self.value == other.value
+        self.class == other.class && value == other.value
       end
 
       # Indicate that this is some kind of result object. Contrast to
@@ -342,10 +341,9 @@ module Errgonomic
 
   module Option
     class Any
-
       def ==(other)
-        return true if self.none? && other.none?
-        return true if self.some? && other.some? && self.value == other.value
+        return true if none? && other.none?
+        return true if some? && other.some? && value == other.value
         false
       end
 
@@ -357,7 +355,8 @@ module Errgonomic
       #   None().some_and { |x| x > 0 } # => false
       def some_and(&block)
         return false if none?
-        !! block.call(self.value)
+
+        !!block.call(value)
       end
 
       # return true if the contained value is None or the block returns truthy
@@ -368,7 +367,8 @@ module Errgonomic
       #   Some(1).none_or { |x| x < 0 } # => false
       def none_or(&block)
         return true if none?
-        !! block.call(self.value)
+
+        !!block.call(value)
       end
 
       # return an Array with the contained value, if any
@@ -385,7 +385,8 @@ module Errgonomic
       #   Some(1).unwrap! # => 1
       #   None().unwrap! # => raise Errgonomic::UnwrapError, "cannot unwrap None"
       def unwrap!
-        raise Errgonomic::UnwrapError, "cannot unwrap None" if none?
+        raise Errgonomic::UnwrapError, 'cannot unwrap None' if none?
+
         value
       end
 
@@ -396,6 +397,7 @@ module Errgonomic
       #   None().expect!("msg") # => raise Errgonomic::ExpectError, "msg"
       def expect!(msg)
         raise Errgonomic::ExpectError, msg if none?
+
         value
       end
 
@@ -405,6 +407,7 @@ module Errgonomic
       #   None().unwrap_or(2) # => 2
       def unwrap_or(default)
         return default if none?
+
         value
       end
 
@@ -415,6 +418,7 @@ module Errgonomic
       #   None().unwrap_or_else { 2 } # => 2
       def unwrap_or_else(&block)
         return block.call if none?
+
         value
       end
 
@@ -445,10 +449,12 @@ module Errgonomic
       #   Some(1).map { :foo } # => raise Errgonomic::ArgumentError, "block must return an Option"
       def map(&block)
         return self if none?
+
         res = block.call(value)
         unless res.is_a?(Errgonomic::Option::Any) || Errgonomic.give_me_ambiguous_downstream_errors?
-          raise ArgumentError, "block must return an Option"
+          raise ArgumentError, 'block must return an Option'
         end
+
         res
       end
 
@@ -462,6 +468,7 @@ module Errgonomic
       #   Some("foo").map_or(0) { |str| str.length } # => 3
       def map_or(default, &block)
         return default if none?
+
         block.call(value)
       end
 
@@ -473,6 +480,7 @@ module Errgonomic
       #   Some("str").map_or_else(-> { 100 }) { |str| str.length } # => 3
       def map_or_else(proc, &block)
         return proc.call if none?
+
         block.call(value)
       end
 
@@ -482,6 +490,7 @@ module Errgonomic
       #   Some(1).ok # => Ok(1)
       def ok
         return Errgonomic::Result::Ok.new(value) if some?
+
         Errgonomic::Result::Err.new
       end
 
@@ -492,6 +501,7 @@ module Errgonomic
       #   Some(1).ok_or("such err") # => Ok(1)
       def ok_or(err)
         return Errgonomic::Result::Ok.new(value) if some?
+
         Errgonomic::Result::Err.new(err)
       end
 
@@ -500,9 +510,10 @@ module Errgonomic
       #
       # @example
       #   None().ok_or_else { "wow" } # => Err("wow")
-      #   Some(1).ok_or_else { "such err" } # => Ok(1)
+      #   Some("foo").ok_or_else { "such err" } # => Ok("foo")
       def ok_or_else(&block)
         return Errgonomic::Result::Ok.new(value) if some?
+
         Errgonomic::Result::Err.new(block.call)
       end
 
@@ -521,7 +532,6 @@ module Errgonomic
       # replace
       # zip
       # zip_with
-
     end
 
     class Some < Any
@@ -529,12 +539,24 @@ module Errgonomic
       def initialize(value)
         @value = value
       end
-      def some?; true; end
-      def none?; false; end
+
+      def some?
+        true
+      end
+
+      def none?
+        false
+      end
     end
+
     class None < Any
-      def some?; false; end
-      def none?; true; end
+      def some?
+        false
+      end
+
+      def none?
+        true
+      end
     end
   end
 
@@ -565,8 +587,8 @@ def Some(value)
   Errgonomic::Option::Some.new(value)
 end
 
-def None()
-  Errgonomic::Option::None.new()
+def None
+  Errgonomic::Option::None.new
 end
 
 class Object

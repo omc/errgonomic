@@ -413,10 +413,5 @@ RSpec.describe Errgonomic do
 
     describe "zip"
     describe "zip_with"
-
-
-
-
-
   end
 end
