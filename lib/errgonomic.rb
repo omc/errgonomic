@@ -56,4 +56,39 @@ class Object
     return block.call if blank?
     self
   end
+
+  # Returns the receiver if it is blank, otherwise raises a NotPresentError.
+  # This method is helpful to enforce expectations where blank objects are required.
+  #
+  # @param message [String] The error message to raise if the receiver is not blank.
+  # @return [Object] The receiver if it is blank, otherwise raises a NotPresentError.
+  def blank_or_raise(message)
+    raise Errgonomic::NotPresentError, message unless blank?
+    self
+  end
+
+  # Returns the receiver if it is blank, otherwise returns the given value.
+  #
+  # @param value [Object] The value to return if the receiver is not blank.
+  # @return [Object] The receiver if it is blank, otherwise the given value.
+  def blank_or(value)
+    # TBD whether this is *too* strict
+    if value.class != self.class && self.class != NilClass
+      raise Errgonomic::TypeMismatchError, "Type mismatch: default value is a #{value.class} but original was a #{self.class}"
+    end
+
+    return self if blank?
+
+    value
+  end
+
+  # Returns the receiver if it is blank, otherwise returns the result of the
+  # block.
+  #
+  # @param block [Proc] The block to call if the receiver is not blank.
+  # @return [Object] The receiver if it is blank, otherwise the result of the block.
+  def blank_or_else(&block)
+    return block.call unless blank?
+    self
+  end
 end
