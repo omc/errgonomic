@@ -31,6 +31,8 @@ module Errgonomic
 
   class ResultRequiredError < Error; end
 
+  class NotComparableError < StandardError; end
+
   # A little bit of control over how pedantic we are in our runtime type checks.
   def self.give_me_ambiguous_downstream_errors?
     @give_me_ambiguous_downstream_errors ||= false

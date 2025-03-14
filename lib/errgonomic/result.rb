@@ -16,8 +16,11 @@ module Errgonomic
       #   Ok("foo") == Ok("foo") # => true
       #   Ok("foo") == Err("foo") # => false
       #   Ok("foo").object_id != Ok("foo").object_id # => true
+      #   Ok(1) == 1 # => raise Errgonomic::NotComparableError
       def ==(other)
-        self.class == other.class && value == other.value
+        raise Errgonomic::NotComparableError unless other.is_a?(Any)
+        return false if self.class != other.class
+        value == other.value
       end
 
       # Indicate that this is some kind of result object. Contrast to
