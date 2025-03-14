@@ -5,17 +5,34 @@ module Errgonomic
     class Any
       # An option of the same type with an equal inner value is equal.
       #
-      # TODO: we're going to monkey patch this into Rails, so we might want to
-      # allow spooky Some(T) == T comparability.
+      # Because we're going to monkey patch this into other libraries Rails, we
+      # allow some "pass through" functionality into the inner value of a Some,
+      # such as comparability here.
+      #
+      # TODO: does None == null?
+      #
+      # strict:
+      #   Some(1) == 1 # => raise Errgonomic::NotComparableError, "Cannot compare Errgonomic::Option::Some with Integer"
       #
       # @example
       #   Some(1) == Some(1) # => true
       #   Some(1) == Some(2) # => false
       #   Some(1) == None() # => false
       #   None() == None() # => true
-      #   Some(1) == 1 # => raise Errgonomic::NotComparableError, "Cannot compare Errgonomic::Option::Some with Integer"
+      #   Some(1) == 1 # => true
       def ==(other)
-        raise NotComparableError, "Cannot compare #{self.class} with #{other.class}" unless other.is_a?(Any)
+
+        unless other.is_a?(Any)
+          if Errgonomic.lenient_inner_value_comparison?
+            # allow comparison of other types of values to the inner of a Some
+            return true if some? && !other.is_a?(Any) && self.value == other
+          else
+            # strictly compare to other Options only
+            raise NotComparableError, "Cannot compare #{self.class} with #{other.class}"
+          end
+        end
+
+        # trivial comparisions of an Option to another Option
         return false if self.class != other.class
         return true if none?
 

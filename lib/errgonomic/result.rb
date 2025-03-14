@@ -16,9 +16,16 @@ module Errgonomic
       #   Ok("foo") == Ok("foo") # => true
       #   Ok("foo") == Err("foo") # => false
       #   Ok("foo").object_id != Ok("foo").object_id # => true
-      #   Ok(1) == 1 # => raise Errgonomic::NotComparableError
+      #   Ok(1) == 1 # => true
       def ==(other)
-        raise Errgonomic::NotComparableError unless other.is_a?(Any)
+        unless other.is_a?(Any)
+          if Errgonomic.lenient_inner_value_comparison?
+            return true if ok? && value == other
+          else
+            raise Errgonomic::NotComparableError, "Cannot compare #{self.class} to #{other.class}"
+          end
+        end
+        # trivial comparison of a Result to another Result
         return false if self.class != other.class
         value == other.value
       end

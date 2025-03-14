@@ -47,4 +47,15 @@ module Errgonomic
   ensure
     @give_me_ambiguous_downstream_errors = original_value
   end
+
+  # Lenient inner value comparison means the inner value of a Some or Ok can be
+  # compared to some other non-Result or non-Option value.
+  def self.lenient_inner_value_comparison?
+    @lenient_inner_value_comparison ||= true
+  end
+
+  def self.give_me_lenient_inner_value_comparison=(value)
+    @lenient_inner_value_comparison = value
+  end
+
 end
