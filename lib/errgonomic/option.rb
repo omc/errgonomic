@@ -20,12 +20,14 @@ module Errgonomic
       #   Some(1) == None() # => false
       #   None() == None() # => true
       #   Some(1) == 1 # => true
+      #   None() == nil # => true
       def ==(other)
 
         unless other.is_a?(Any)
           if Errgonomic.lenient_inner_value_comparison?
             # allow comparison of other types of values to the inner of a Some
             return true if some? && !other.is_a?(Any) && self.value == other
+            return true if none? && other.nil?
           else
             # strictly compare to other Options only
             raise NotComparableError, "Cannot compare #{self.class} with #{other.class}"
