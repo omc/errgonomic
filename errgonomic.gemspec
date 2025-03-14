@@ -1,8 +1,7 @@
 # frozen_string_literal: true
 
 # when we build in the nix store, version.rb is hashed and adjacent to the gemspec
-if __FILE__.include?("/nix/store")
-  version_file = Dir.glob("./*-version.rb").first
+if __FILE__.include?("/nix/store") && (version_file = Dir.glob("./*-version.rb").first)
   require_relative version_file
 else
   require_relative "lib/errgonomic/version"
