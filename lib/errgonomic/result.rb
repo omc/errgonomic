@@ -16,17 +16,11 @@ module Errgonomic
       #   Ok("foo") == Ok("foo") # => true
       #   Ok("foo") == Err("foo") # => false
       #   Ok("foo").object_id != Ok("foo").object_id # => true
-      #   Ok(1) == 1 # => true
+      #   Ok(1) == 1 # => false
+      #   Err() == nil # => false
       def ==(other)
-        unless other.is_a?(Any)
-          if Errgonomic.lenient_inner_value_comparison?
-            return true if ok? && value == other
-          else
-            raise Errgonomic::NotComparableError, "Cannot compare #{self.class} to #{other.class}"
-          end
-        end
-        # trivial comparison of a Result to another Result
         return false if self.class != other.class
+
         value == other.value
       end
 
@@ -252,7 +246,6 @@ module Errgonomic
         false
       end
     end
-
   end
 end
 
@@ -285,7 +278,6 @@ class Object
     raise Errgonomic::ResultRequiredError
   end
 end
-
 
 # Global convenience method for constructing an Ok result.
 def Ok(value)
