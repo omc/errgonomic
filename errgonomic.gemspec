@@ -1,26 +1,26 @@
 # frozen_string_literal: true
 
 # when we build in the nix store, version.rb is hashed and adjacent to the gemspec
-if __FILE__.include?("/nix/store") && (version_file = Dir.glob("./*-version.rb").first)
+if __FILE__.include?('/nix/store') && (version_file = Dir.glob('./*-version.rb').first)
   require_relative version_file
 else
-  require_relative "lib/errgonomic/version"
+  require_relative 'lib/errgonomic/version'
 end
 
 Gem::Specification.new do |spec|
-  spec.name = "errgonomic"
+  spec.name = 'errgonomic'
   spec.version = Errgonomic::VERSION
-  spec.authors = ["Nick Zadrozny"]
-  spec.email = ["nick@onemorecloud.com"]
+  spec.authors = ['Nick Zadrozny']
+  spec.email = ['nick@onemorecloud.com']
 
-  spec.summary = "Opinionated, ergonomic error handling for Ruby, inspired by Rails and Rust."
+  spec.summary = 'Opinionated, ergonomic error handling for Ruby, inspired by Rails and Rust.'
   spec.description = "Let's blend the Rails 'present' and 'blank' conventions with a few patterns from Rust Option types."
-  spec.homepage = "https://omc.io/"
-  spec.license = "MIT"
-  spec.required_ruby_version = ">= 3.0.0"
+  spec.homepage = 'https://omc.io/'
+  spec.license = 'MIT'
+  spec.required_ruby_version = '>= 3.0.0'
 
-  spec.metadata["homepage_uri"] = spec.homepage
-  spec.metadata["source_code_uri"] = "https://github.com/omc/errgonomic"
+  spec.metadata['homepage_uri'] = spec.homepage
+  spec.metadata['source_code_uri'] = 'https://github.com/omc/errgonomic'
 
   # Specify which files should be added to the gem when it is released.
   # The `git ls-files -z` loads the files in the RubyGem that have been added into git.
@@ -31,16 +31,16 @@ Gem::Specification.new do |spec|
         f.start_with?(*%w[bin/ test/ spec/ features/ .git .github appveyor Gemfile])
     end
   end
-  spec.bindir = "exe"
+  spec.bindir = 'exe'
   spec.executables = spec.files.grep(%r{\Aexe/}) { |f| File.basename(f) }
-  spec.require_paths = ["lib"]
+  spec.require_paths = ['lib']
 
   # Uncomment to register a new dependency of your gem
   # spec.add_dependency "example-gem", "~> 1.0"
 
-  spec.add_dependency "concurrent-ruby", "~> 1.0"
-  spec.add_development_dependency "yard", "~> 0.9"
-  spec.add_development_dependency "yard-doctest", "~> 0.1"
+  spec.add_dependency 'concurrent-ruby', '~> 1.0'
+  spec.add_development_dependency 'yard', '~> 0.9'
+  spec.add_development_dependency 'yard-doctest', '~> 0.1'
 
   # For more information and examples about making a new gem, check out our
   # guide at: https://bundler.io/guides/creating_gem.html

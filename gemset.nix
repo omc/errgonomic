@@ -57,7 +57,7 @@
       path = ./.;
       type = "path";
     };
-    version = "0.1.0";
+    version = "0.2.0";
   };
   jaro_winkler = {
     groups = ["default"];
@@ -340,6 +340,17 @@
       type = "gem";
     };
     version = "1.38.1";
+  };
+  rubocop-yard = {
+    dependencies = ["rubocop" "yard"];
+    groups = ["development"];
+    platforms = [];
+    source = {
+      remotes = ["https://rubygems.org"];
+      sha256 = "03s8lwah6apkr1g25whhd9y2zrqq9dy56g5kwn0bxp0slakrpisz";
+      type = "gem";
+    };
+    version = "0.10.0";
   };
   ruby-progressbar = {
     groups = ["default"];

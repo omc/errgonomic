@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require "concurrent/map"
+require 'concurrent/map'
 
 class Object
   # An object is blank if it's false, empty, or a whitespace string.
@@ -99,7 +99,7 @@ class Array
   #   [1,2,3].blank? # => false
   #
   # @return [true, false]
-  alias_method :blank?, :empty?
+  alias blank? empty?
 
   def present? # :nodoc:
     !empty?
@@ -113,7 +113,7 @@ class Hash
   #   { key: 'value' }.blank?  # => false
   #
   # @return [true, false]
-  alias_method :blank?, :empty?
+  alias blank? empty?
 
   def present? # :nodoc:
     !empty?
@@ -125,7 +125,7 @@ class Symbol
   #
   #   :''.blank?     # => true
   #   :symbol.blank? # => false
-  alias_method :blank?, :empty?
+  alias blank? empty?
 
   def present? # :nodoc:
     !empty?

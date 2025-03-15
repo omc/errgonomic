@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 # The semantics here borrow heavily from ActiveSupport. Let's prefer that if
 # loaded, otherwise just copypasta the bits we like. Or convince me to make that
 # gem a dependency.
@@ -53,6 +55,7 @@ class Object
   # @return [Object] The receiver if it is blank, otherwise raises a NotPresentError.
   def blank_or_raise(message)
     raise Errgonomic::NotPresentError, message unless blank?
+
     self
   end
 
@@ -63,7 +66,8 @@ class Object
   def blank_or(value)
     # TBD whether this is *too* strict
     if value.class != self.class && self.class != NilClass
-      raise Errgonomic::TypeMismatchError, "Type mismatch: default value is a #{value.class} but original was a #{self.class}"
+      raise Errgonomic::TypeMismatchError,
+            "Type mismatch: default value is a #{value.class} but original was a #{self.class}"
     end
 
     return self if blank?
@@ -78,6 +82,7 @@ class Object
   # @return [Object] The receiver if it is blank, otherwise the result of the block.
   def blank_or_else(&block)
     return block.call unless blank?
+
     self
   end
 end

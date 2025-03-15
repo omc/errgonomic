@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 module Errgonomic
   module Option
     class Any

@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 module Errgonomic
   module Result
     # The base class for Result's Ok and Err class variants. We implement as
@@ -12,10 +14,12 @@ module Errgonomic
 
       # Equality comparison for Result objects is based on value not reference.
       #
+      # @param other [Object]
+      #
       # @example
-      #   Ok("foo") == Ok("foo") # => true
-      #   Ok("foo") == Err("foo") # => false
-      #   Ok("foo").object_id != Ok("foo").object_id # => true
+      #   Ok(1) == Ok(1) # => true
+      #   Ok(1) == Err(1) # => false
+      #   Ok(1).object_id == Ok(1).object_id # => false
       #   Ok(1) == 1 # => false
       #   Err() == nil # => false
       def ==(other)
@@ -26,10 +30,11 @@ module Errgonomic
 
       # Indicate that this is some kind of result object. Contrast to
       # Object#result? which is false for all other types.
+      #
       # @example
-      #   Ok("foo").result? # => true
-      #   Err("foo").result? # => true
-      #   "foo".result? # => false
+      #   Ok("a").result? # => true
+      #   Err("a").result? # => true
+      #   "a".result? # => false
       def result?
         true
       end
@@ -37,11 +42,13 @@ module Errgonomic
       # Return true if the inner value is an Ok and the result of the block is
       # truthy.
       #
+      # @param [Proc] block The block to evaluate if the inner value is an Ok.
+      #
       # @example
-      #   Ok("foo").ok_and? { |_| true } # => true
-      #   Ok("foo").ok_and? { |_| false } # => false
-      #   Err("foo").ok_and? { |_| true } # => false
-      #   Err("foo").ok_and? { |_| false } # => false
+      #   Ok(1).ok_and?(&:odd?) # => true
+      #   Ok(1).ok_and?(&:even?) # => false
+      #   Err(:a).ok_and? { |_| true } # => false
+      #   Err(:b).ok_and? { |_| false } # => false
       def ok_and?(&block)
         if ok?
           !!block.call(value)
@@ -54,10 +61,10 @@ module Errgonomic
       # truthy.
       #
       # @example
-      #   Ok("foo").err_and? { |_| true } # => false
-      #   Ok("foo").err_and? { |_| false } # => false
-      #   Err("foo").err_and? { |_| true } # => true
-      #   Err("foo").err_and? { |_| false } # => false
+      #   Ok(1).err_and?(&:odd?) # => false
+      #   Ok(1).err_and?(&:even?) # => false
+      #   Err(:a).err_and? { |_| true } # => true
+      #   Err(:b).err_and? { |_| false } # => false
       def err_and?(&block)
         if err?
           !!block.call(value)
@@ -69,8 +76,8 @@ module Errgonomic
       # Return the inner value of an Ok, else raise an exception when Err.
       #
       # @example
-      #   Ok("foo").unwrap! # => "foo"
-      #   Err("foo").unwrap! # => raise Errgonomic::UnwrapError, "value is an Err"
+      #   Ok(1).unwrap! # => 1
+      #   Err(:c).unwrap! # => raise Errgonomic::UnwrapError, "value is an Err"
       def unwrap!
         raise Errgonomic::UnwrapError, 'value is an Err' unless ok?
 
@@ -80,9 +87,11 @@ module Errgonomic
       # Return the inner value of an Ok, else raise an exception with the given
       # message when Err.
       #
+      # @param msg [String]
+      #
       # @example
-      #   Ok("foo").expect!("foo") # => "foo"
-      #   Err("foo").expect!("foo") # => raise Errgonomic::ExpectError, "foo"
+      #   Ok(1).expect!("should have worked") # => 1
+      #   Err(:d).expect!("should have worked") # => raise Errgonomic::ExpectError, "should have worked"
       def expect!(msg)
         raise Errgonomic::ExpectError, msg unless ok?
 
@@ -92,10 +101,10 @@ module Errgonomic
       # Return the inner value of an Err, else raise an exception when Ok.
       #
       # @example
-      #   Ok("foo").unwrap_err! # => raise Errgonomic::UnwrapError, "value is an Ok"
-      #   Err("foo").unwrap_err! # => "foo"
+      #   Ok(1).unwrap_err! # => raise Errgonomic::UnwrapError, 1
+      #   Err(:e).unwrap_err! # => :e
       def unwrap_err!
-        raise Errgonomic::UnwrapError, 'value is an Ok' unless err?
+        raise Errgonomic::UnwrapError, value unless err?
 
         @value
       end
@@ -103,12 +112,14 @@ module Errgonomic
       # Given another result, return it if the inner result is Ok, else return
       # the inner Err. Raise an exception if the other value is not a Result.
       #
+      # @param other [Errgonomic::Result::Any]
+      #
       # @example
-      #   Ok("foo").and(Ok("bar")) # => Ok("bar")
-      #   Ok("foo").and(Err("bar")) # => Err("bar")
-      #   Err("foo").and(Ok("bar")) # => Err("foo")
-      #   Err("foo").and(Err("bar")) # => Err("foo")
-      #   Ok("foo").and("bar") # => raise Errgonomic::ArgumentError, "other must be a Result"
+      #   Ok(1).and(Ok(2)) # => Ok(2)
+      #   Ok(1).and(Err(:f)) # => Err(:f)
+      #   Err(:g).and(Ok(1)) # => Err(:g)
+      #   Err(:h).and(Err(:i)) # => Err(:h)
+      #   Ok(1).and(2) # => raise Errgonomic::ArgumentError, "other must be a Result"
       def and(other)
         raise Errgonomic::ArgumentError, 'other must be a Result' unless other.is_a?(Errgonomic::Result::Any)
         return self if err?
@@ -121,11 +132,18 @@ module Errgonomic
       # pedantically check the type of the block's return value at runtime. This
       # is annoying, sorry, but better than an "undefined method" error.
       # Hopefully it gives your test suite a chance to detect incorrect usage.
+      #
+      # @param block [Proc]
+      #
+      # @example
+      #   Ok(1).and_then { |x| Ok(x + 1) } # => Ok(2)
+      #   Ok(1).and_then { |_| Err(:error) } # => Err(:error)
+      #   Err(:error).and_then { |x| Ok(x + 1) } # => Err(:error)
+      #   Err(:error).and_then { |x| Err(:error2) } # => Err(:error)
       def and_then(&block)
-        # raise NotImplementedError, "and_then is not implemented yet"
         return self if err?
 
-        res = block.call(self)
+        res = block.call(value)
         unless res.is_a?(Errgonomic::Result::Any) || Errgonomic.give_me_ambiguous_downstream_errors?
           raise Errgonomic::ArgumentError, 'and_then block must return a Result'
         end
@@ -136,10 +154,12 @@ module Errgonomic
       # Return other if self is Err, else return the original Option. Raises a
       # pedantic runtime exception if other is not a Result.
       #
+      # @param other [Errgonomic::Result::Any]
+      #
       # @example
-      #   Err("foo").or(Ok("bar")) # => Ok("bar")
-      #   Err("foo").or(Err("baz")) # => Err("baz")
-      #   Err("foo").or("bar") # => raise Errgonomic::ArgumentError, "other must be a Result; you might want unwrap_or"
+      #   Err(:j).or(Ok(1)) # => Ok(1)
+      #   Err(:k).or(Err(:l)) # => Err(:l)
+      #   Err(:m).or("oops") # => raise Errgonomic::ArgumentError, "other must be a Result; you might want unwrap_or"
       def or(other)
         unless other.is_a?(Errgonomic::Result::Any)
           raise Errgonomic::ArgumentError,
@@ -155,11 +175,13 @@ module Errgonomic
       # Sorry about that, hopefully it helps your tests. Better than ambiguous
       # downstream "undefined method" errors, probably.
       #
+      # @param block [Proc]
+      #
       # @example
-      #   Ok("foo").or_else { Ok("bar") } # => Ok("foo")
-      #   Err("foo").or_else { Ok("bar") } # => Ok("bar")
-      #   Err("foo").or_else { Err("baz") } # => Err("baz")
-      #   Err("foo").or_else { "bar" } # => raise Errgonomic::ArgumentError, "or_else block must return a Result"
+      #   Ok(1).or_else { Ok(2) } # => Ok(1)
+      #   Err(:o).or_else { Ok(1) } # => Ok(1)
+      #   Err(:q).or_else { Err(:r) } # => Err(:r)
+      #   Err(:s).or_else { "oops" } # => raise Errgonomic::ArgumentError, "or_else block must return a Result"
       def or_else(&block)
         return self if ok?
 
@@ -173,9 +195,11 @@ module Errgonomic
 
       # Return the inner value if self is Ok, else return the provided default.
       #
+      # @param other [Object]
+      #
       # @example
-      #   Ok("foo").unwrap_or("bar") # => "foo"
-      #   Err("foo").unwrap_or("bar") # => "bar"
+      #   Ok(1).unwrap_or(2) # => 1
+      #   Err(:t).unwrap_or(:u) # => :u
       def unwrap_or(other)
         return value if ok?
 
@@ -185,9 +209,11 @@ module Errgonomic
       # Return the inner value if self is Ok, else lazy evaluate the block and
       # return its result.
       #
+      # @param block [Proc]
+      #
       # @example
-      #   Ok("foo").unwrap_or_else { "bar" } # => "foo"
-      #   Err("foo").unwrap_or_else { "bar" } # => "bar"
+      #   Ok(1).unwrap_or_else { 2 } # => 1
+      #   Err(:v).unwrap_or_else { :w } # => :w
       def unwrap_or_else(&block)
         return value if ok?
 
@@ -202,7 +228,7 @@ module Errgonomic
       # Ok is always ok
       #
       # @example
-      #   Ok("foo").ok? # => true
+      #   Ok(1).ok? # => true
       def ok?
         true
       end
@@ -210,7 +236,7 @@ module Errgonomic
       # Ok is never err
       #
       # @example
-      #   Ok("foo").err? # => false
+      #   Ok(1).err? # => false
       def err?
         false
       end
@@ -224,7 +250,7 @@ module Errgonomic
       # Err may be constructed without a value, if you want.
       #
       # @example
-      #   Err("foo").value # => "foo"
+      #   Err(:y).value # => :y
       #   Err().value # => Arbitrary
       def initialize(value = Arbitrary)
         super(value)
@@ -233,7 +259,7 @@ module Errgonomic
       # Err is always err
       #
       # @example
-      #   Err("foo").err? # => true
+      #   Err(:z).err? # => true
       def err?
         true
       end
@@ -241,7 +267,7 @@ module Errgonomic
       # Err is never ok
       #
       # @example
-      #   Err("foo").ok? # => false
+      #   Err(:A).ok? # => false
       def ok?
         false
       end

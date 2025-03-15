@@ -1,8 +1,6 @@
 # frozen_string_literal: true
 
-unless defined?(Errgonomic::VERSION)
-  require_relative 'errgonomic/version'
-end
+require_relative 'errgonomic/version' unless defined?(Errgonomic::VERSION)
 
 # A more opinionated blend with Rails presence.
 require_relative 'errgonomic/presence'
@@ -40,7 +38,7 @@ module Errgonomic
 
   # You can opt out of the pedantic runtime checks for lazy block evaluation,
   # but not quietly.
-  def self.with_ambiguous_downstream_errors(&block)
+  def self.with_ambiguous_downstream_errors
     original_value = @give_me_ambiguous_downstream_errors
     @give_me_ambiguous_downstream_errors = true
     yield
@@ -57,5 +55,4 @@ module Errgonomic
   def self.give_me_lenient_inner_value_comparison=(value)
     @lenient_inner_value_comparison = value
   end
-
 end
