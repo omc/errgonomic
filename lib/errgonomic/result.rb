@@ -144,7 +144,7 @@ module Errgonomic
         return self if err?
 
         res = block.call(value)
-        unless res.is_a?(Errgonomic::Result::Any) || Errgonomic.give_me_ambiguous_downstream_errors?
+        if !res.is_a?(Errgonomic::Result::Any) && Errgonomic.give_me_ambiguous_downstream_errors?
           raise Errgonomic::ArgumentError, 'and_then block must return a Result'
         end
 
@@ -186,7 +186,7 @@ module Errgonomic
         return self if ok?
 
         res = block.call(self)
-        unless res.is_a?(Errgonomic::Result::Any) || Errgonomic.give_me_ambiguous_downstream_errors?
+        if !res.is_a?(Errgonomic::Result::Any) && Errgonomic.give_me_ambiguous_downstream_errors?
           raise Errgonomic::ArgumentError, 'or_else block must return a Result'
         end
 

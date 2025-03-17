@@ -33,7 +33,7 @@ module Errgonomic
 
   # A little bit of control over how pedantic we are in our runtime type checks.
   def self.give_me_ambiguous_downstream_errors?
-    @give_me_ambiguous_downstream_errors ||= false
+    @give_me_ambiguous_downstream_errors || true
   end
 
   # You can opt out of the pedantic runtime checks for lazy block evaluation,

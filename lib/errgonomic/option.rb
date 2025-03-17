@@ -2,6 +2,7 @@
 
 module Errgonomic
   module Option
+    # The base class for all options. Some and None are subclasses.
     class Any
       # An option of the same type with an equal inner value is equal.
       #
@@ -133,7 +134,7 @@ module Errgonomic
         return self if none?
 
         res = block.call(value)
-        unless res.is_a?(Errgonomic::Option::Any) || Errgonomic.give_me_ambiguous_downstream_errors?
+        if !res.is_a?(Errgonomic::Option::Any) && Errgonomic.give_me_ambiguous_downstream_errors?
           raise ArgumentError, 'block must return an Option'
         end
 
@@ -199,12 +200,65 @@ module Errgonomic
         Errgonomic::Result::Err.new(block.call)
       end
 
-      # TODO:
-      # and
-      # and_then
+      # Returns the option if it contains a value, otherwise returns the provided Option. Returns an Option.
+      #
+      # @example
+      #   None().or(Some(1)) # => Some(1)
+      #   Some(2).or(Some(3)) # => Some(2)
+      #   None().or(2) # => raise Errgonomic::ArgumentError.new, "other must be an Option, was Integer"
+      def or(other)
+        raise ArgumentError, "other must be an Option, was #{other.class.name}" unless other.is_a?(Any)
+
+        return self if some?
+
+        other
+      end
+
+      # Returns the option if it contains a value, otherwise calls the block and returns the result. Returns an Option.
+      #
+      # @example
+      #   None().or_else { Some(1) } # => Some(1)
+      #   Some(2).or_else { Some(3) } # => Some(2)
+      #   None().or_else { 2 } # => raise Errgonomic::ArgumentError.new, "block must return an Option, was Integer"
+      def or_else(&block)
+        return self if some?
+
+        val = block.call
+        if !val.is_a?(Errgonomic::Option::Any) && Errgonomic.give_me_ambiguous_downstream_errors?
+          raise Errgonomic::ArgumentError.new, "block must return an Option, was #{val.class.name}"
+        end
+
+        val
+      end
+
+      # If self is Some, return the provided other Option.
+      #
+      # @example
+      #   None().and(Some(1)) # => None()
+      #   Some(2).and(Some(3)) # => Some(3)
+      def and(other)
+        return self if none?
+
+        other
+      end
+
+      # If self is Some, call the given block and return its value. Block most return an Option.
+      #
+      # @example
+      #   None().and_then { Some(1) } # => None()
+      #   Some(2).and_then { Some(3) } # => Some(3)
+      def and_then(&block)
+        return self if none?
+
+        val = block.call
+        if Errgonomic.give_me_ambiguous_downstream_errors? && !val.is_a?(Errgonomic::Option::Any)
+          raise Errgonomic::ArgumentError.new, "block must return an Option, was #{val.class.name}"
+        end
+
+        val
+      end
+
       # filter
-      # or
-      # or_else
       # xor
       # insert
       # get_or_insert
