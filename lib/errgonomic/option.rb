@@ -41,6 +41,8 @@ module Errgonomic
         !!block.call(value)
       end
 
+      alias some_and? some_and
+
       # return true if the contained value is None or the block returns truthy
       #
       # @example
@@ -52,6 +54,8 @@ module Errgonomic
 
         !!block.call(value)
       end
+
+      alias none_or? none_or
 
       # return an Array with the contained value, if any
       # @example
@@ -125,20 +129,15 @@ module Errgonomic
       # Maps the Option to another Option by applying a function to the
       # contained value (if Some) or returns None. Raises a pedantic exception
       # if the return value of the block is not an Option.
+      #
       # @example
-      #   Some(1).map { |x| Some(x + 1) } # => Some(2)
-      #   Some(1).map { |x| None() } # => None()
-      #   None().map { Some(1) } # => None()
-      #   Some(1).map { :foo } # => raise Errgonomic::ArgumentError, "block must return an Option"
+      #   Some(1).map { |x| x + 1 } # => Some(2)
+      #   Some(1).map { |x| None() } # => Some(None())
+      #   None().map { 1 } # => None()
       def map(&block)
         return self if none?
 
-        res = block.call(value)
-        if !res.is_a?(Errgonomic::Option::Any) && Errgonomic.give_me_ambiguous_downstream_errors?
-          raise ArgumentError, 'block must return an Option'
-        end
-
-        res
+        Some(block.call(value))
       end
 
       # Returns the provided default (if none), or applies a function to the
@@ -146,25 +145,29 @@ module Errgonomic
       # value, use +map_or_else+.
       #
       # @example
-      #   None().map_or(1) { 100 } # => 1
-      #   Some(1).map_or(1) { |x| x + 1 } # => 2
-      #   Some("foo").map_or(0) { |str| str.length } # => 3
+      #   None().map_or(1) { 100 } # => Some(1)
+      #   Some(1).map_or(100) { |x| x + 1 } # => Some(2)
+      #   Some("foo").map_or(0) { |str| str.length } # => Some(3)
       def map_or(default, &block)
-        return default if none?
+        return Some(default) if none?
 
-        block.call(value)
+        Some(block.call(value))
       end
 
       # Computes a default from the given Proc if None, or applies the block to
       # the contained value (if Some).
       #
       # @example
-      #   None().map_or_else(-> { :foo }) { :bar } # => :foo
-      #   Some("str").map_or_else(-> { 100 }) { |str| str.length } # => 3
+      #   None().map_or_else(-> { :foo }) { :bar } # => Some(:foo)
+      #   Some("str").map_or_else(-> { 100 }) { |str| str.length } # => Some(3)
+      #   None().map_or_else( -> { nil }) { |str| str.length } # => None()
       def map_or_else(proc, &block)
-        return proc.call if none?
+        if none?
+          val = proc.call
+          return val ? Some(val) : None()
+        end
 
-        block.call(value)
+        Some(block.call(value))
       end
 
       # convert the option into a result where Some is Ok and None is Err
