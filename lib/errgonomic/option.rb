@@ -132,8 +132,7 @@ module Errgonomic
       #
       # @example
       #   Some(1).map { |x| x + 1 } # => Some(2)
-      #   Some(1).map { |x| None() } # => Some(None())
-      #   None().map { 1 } # => None()
+      #   None().map { |x| x + 1 } # => None()
       def map(&block)
         return self if none?
 
@@ -273,6 +272,7 @@ module Errgonomic
       # zip_with
     end
 
+    # Represent a value
     class Some < Any
       attr_accessor :value
 
