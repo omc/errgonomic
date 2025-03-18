@@ -3,6 +3,7 @@
 module Errgonomic
   module Option
     # The base class for all options. Some and None are subclasses.
+    #
     class Any
       # An option of the same type with an equal inner value is equal.
       #
@@ -27,6 +28,22 @@ module Errgonomic
         return true if none?
 
         value == other.value
+      end
+
+      # @example
+      #   measurement = Errgonomic::Option::Some.new(1)
+      #   case measurement
+      #   in Errgonomic::Option::Some, value
+      #     "Measurement is #{measurement.value}"
+      #   in Errgonomic::Option::None
+      #     "Measurement is not available"
+      #   else
+      #     "not matched"
+      #   end # => "Measurement is 1"
+      def deconstruct
+        return [self, value] if some?
+
+        [Errgonomic::Option::None]
       end
 
       # return true if the contained value is Some and the block returns truthy
