@@ -277,6 +277,35 @@ module Errgonomic
         val
       end
 
+      # Zips self with another Option.
+      #
+      # If self is Some(s) and other is Some(o), this method returns
+      # Some([s, o]). Otherwise, None is returned.
+      #
+      # @example
+      #   None().zip(Some(1)) # => None()
+      #   Some(1).zip(None()) # => None()
+      #   Some(2).zip(Some(3)) # => Some([2, 3])
+      def zip(other)
+        return None() unless some? && other.some?
+
+        Some([value, other.value])
+      end
+
+      # Zip two options using the block passed. If self is Some and Other is
+      # some, yield both of their values to the block and return its value as
+      # Some. Else return None.
+      #
+      # @example
+      #   None().zip_with(Some(1)) { |a, b| a + b } # => None()
+      #   Some(1).zip_with(None()) { |a, b| a + b } # => None()
+      #   Some(2).zip_with(Some(3)) { |a, b| a + b } # => Some(5)
+      def zip_with(other, &block)
+        return None() unless some? && other.some?
+        other = block.call(value, other.value)
+        Some(other)
+      end
+
       # filter
       # xor
       # insert
