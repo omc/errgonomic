@@ -5,6 +5,9 @@ require_relative 'errgonomic/version' unless defined?(Errgonomic::VERSION)
 # A more opinionated blend with Rails presence.
 require_relative 'errgonomic/presence'
 
+# Bring in a subtle and manual type checker.
+require_relative 'errgonomic/type'
+
 # Bring in our Option and Result.
 require_relative 'errgonomic/option'
 require_relative 'errgonomic/result'
