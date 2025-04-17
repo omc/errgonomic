@@ -9,6 +9,9 @@ require_relative 'errgonomic/presence'
 require_relative 'errgonomic/option'
 require_relative 'errgonomic/result'
 
+# Rails fu
+require_relative 'errgonomic/rails' if defined?(Rails::Railtie)
+
 # Errgonomic adds opinionated abstractions to handle errors in a way that blends
 # Rust and Ruby ergonomics. This library leans on Rails conventions for some
 # presence-related methods; when in doubt, make those feel like Rails. It also
