@@ -7,11 +7,36 @@ PATH
 GEM
   remote: https://rubygems.org/
   specs:
+    activemodel (8.0.2)
+      activesupport (= 8.0.2)
+    activerecord (8.0.2)
+      activemodel (= 8.0.2)
+      activesupport (= 8.0.2)
+      timeout (>= 0.4.0)
+    activesupport (8.0.2)
+      base64
+      benchmark (>= 0.3)
+      bigdecimal
+      concurrent-ruby (~> 1.0, >= 1.3.1)
+      connection_pool (>= 2.2.5)
+      drb
+      i18n (>= 1.6, < 2)
+      logger (>= 1.4.2)
+      minitest (>= 5.1)
+      securerandom (>= 0.3)
+      tzinfo (~> 2.0, >= 2.0.5)
+      uri (>= 0.13.1)
     ast (2.4.2)
     backport (1.2.0)
+    base64 (0.2.0)
     benchmark (0.4.0)
+    bigdecimal (3.1.9)
     concurrent-ruby (1.3.5)
+    connection_pool (2.5.1)
     diff-lcs (1.6.0)
+    drb (2.2.1)
+    i18n (1.14.7)
+      concurrent-ruby (~> 1.0)
     jaro_winkler (1.6.0)
     json (2.10.1)
     kramdown (2.5.1)
@@ -69,6 +94,7 @@ GEM
       rubocop (~> 1.21)
       yard
     ruby-progressbar (1.13.0)
+    securerandom (0.4.1)
     solargraph (0.52.0)
       backport (~> 1.2)
       benchmark
@@ -88,11 +114,17 @@ GEM
       tilt (~> 2.0)
       yard (~> 0.9, >= 0.9.24)
       yard-solargraph (~> 0.1)
+    sqlite3 (2.6.0)
+      mini_portile2 (~> 2.8.0)
     thor (1.3.2)
     tilt (2.6.0)
+    timeout (0.4.3)
+    tzinfo (2.0.6)
+      concurrent-ruby (~> 1.0)
     unicode-display_width (3.1.4)
       unicode-emoji (~> 4.0, >= 4.0.4)
     unicode-emoji (4.0.4)
+    uri (1.0.3)
     yard (0.9.37)
     yard-doctest (0.1.17)
       minitest
@@ -104,12 +136,15 @@ PLATFORMS
   ruby
 
 DEPENDENCIES
+  activerecord
   errgonomic!
+  minitest
   rake (~> 13.0)
   rspec (~> 3.0)
   rubocop
   rubocop-yard
   solargraph
+  sqlite3
   yard (~> 0.9)
   yard-doctest (~> 0.1)
 
