@@ -1,5 +1,9 @@
 ## [Unreleased]
 
+## [0.2.0] - 2025-05-01
+
+- Type assertions: `type_or_raise!`, `type_or`
+
 ## [0.2.0] - 2025-03-28
 
 - Introduce (most of) Result and Option
