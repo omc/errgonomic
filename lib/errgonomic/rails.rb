@@ -16,6 +16,7 @@ module Errgonomic
     # later reflection.
     def self.setup_after
       ActiveRecord::Base.descendants.each do |model|
+        puts "errgonomic making #{model.name} optional"
         model.include Errgonomic::Rails::ActiveRecordOptional if model.table_name
       end
     end
