@@ -24,9 +24,11 @@ module Errgonomic
   # Hook into Rails with a Railtie
   class Railtie < ::Rails::Railtie
     initializer 'errgonomic.setup_before' do
+      puts "errgonomic railtie initializer to_prepare setup_before"
       Errgonomic::Rails.setup_before
     end
     config.to_prepare do
+      puts "errgonomic railtie config.to_prepare setup_after"
       Errgonomic::Rails.setup_after
     end
   end
