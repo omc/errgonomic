@@ -15,7 +15,6 @@ module Errgonomic
     # the class is first evaluated, so that it can define its associations for
     # later reflection.
     def self.setup_after
-      Rails.application.eager_load! unless Rails.configuration.cache_classes
       ActiveRecord::Base.descendants.each do |model|
         next unless model.table_exists? rescue false
         puts "errgonomic making #{model.name} optional"
