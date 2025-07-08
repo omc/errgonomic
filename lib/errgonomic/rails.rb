@@ -15,9 +15,11 @@ module Errgonomic
     # the class is first evaluated, so that it can define its associations for
     # later reflection.
     def self.setup_after
+      Rails.application.eager_load! unless Rails.configuration.cache_classes
       ActiveRecord::Base.descendants.each do |model|
+        next unless model.table_exists? rescue false
         puts "errgonomic making #{model.name} optional"
-        model.include Errgonomic::Rails::ActiveRecordOptional if model.table_name
+        model.include Errgonomic::Rails::ActiveRecordOptional
       end
     end
   end
@@ -27,6 +29,11 @@ module Errgonomic
     initializer 'errgonomic.setup_before' do
       puts "errgonomic railtie initializer to_prepare setup_before"
       Errgonomic::Rails.setup_before
+    end
+    config.after_initialize do
+      ActiveSupport.on_load(:after_initialize) do
+        Errgonomic::Rails.setup_after
+      end
     end
     config.to_prepare do
       puts "errgonomic railtie config.to_prepare setup_after"
