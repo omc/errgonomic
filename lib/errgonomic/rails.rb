@@ -18,7 +18,8 @@ module Errgonomic
     # later reflection.
     def self.setup_after
       Zeitwerk::Loader.eager_load_all
-      ActiveRecord::Base.descendants.each do |model|
+      setupable = defined?(ApplicationRecord) ? ApplicationRecord : ActiveRecord::Base
+      setupable.descendants.each do |model|
         next unless begin
           model.table_exists?
         rescue StandardError
