@@ -6,6 +6,7 @@ module Errgonomic
     #
     module ActiveRecordOptional
       extend ActiveSupport::Concern
+
       included do
         # ::Rails.logger.debug('ActiveRecordOptional')
         optional_associations = reflect_on_all_associations(:belongs_to)
@@ -13,17 +14,22 @@ module Errgonomic
                                 .map(&:name)
         optional_attributes = column_names
                               .select { |n| column_for_attribute(n).null }
-        @optionals = (optional_attributes + optional_associations)
-        @optionals.each do |name|
-          # Rails.logger.debug("#{self.name}: #{name}: optional")
+        @errgonomic_optionals = (optional_attributes + optional_associations)
+        @errgonomic_optionals.each do |name|
           class_eval <<-RUBY, __FILE__, __LINE__ + 1
-        def #{name}
-          raise "stack too deep" if caller.length > 1024
-          val = super
-          val.nil? ? Errgonomic::Option::None.new : Errgonomic::Option::Some.new(val)
-        end
+            def #{name}
+              raise "stack too deep" if caller.length > 1024
+              val = super
+              val.nil? ? Errgonomic::Option::None.new : Errgonomic::Option::Some.new(val)
+            end
           RUBY
         end
+      end
+    end
+
+    class_methods do
+      def errgonomic_optionals
+        @errgonomic_optionals
       end
     end
   end
