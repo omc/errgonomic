@@ -25,11 +25,11 @@ module Errgonomic
           RUBY
         end
       end
-    end
 
-    class_methods do
-      def errgonomic_optionals
-        @errgonomic_optionals
+      class_methods do
+        def errgonomic_optionals
+          @errgonomic_optionals
+        end
       end
     end
   end
