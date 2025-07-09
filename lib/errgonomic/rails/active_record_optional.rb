@@ -13,7 +13,8 @@ module Errgonomic
                                 .map(&:name)
         optional_attributes = column_names
                               .select { |n| column_for_attribute(n).null }
-        (optional_attributes + optional_associations).each do |name|
+        @optionals = (optional_attributes + optional_associations)
+        @optionals.each do |name|
           # Rails.logger.debug("#{self.name}: #{name}: optional")
           class_eval <<-RUBY, __FILE__, __LINE__ + 1
         def #{name}

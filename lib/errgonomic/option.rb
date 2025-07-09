@@ -5,6 +5,10 @@ module Errgonomic
     # The base class for all options. Some and None are subclasses.
     #
     class Any
+      # def method_missing(_name, *_args)
+      #   raise 'do it right noob'
+      # end
+
       # An option of the same type with an equal inner value is equal.
       #
       # Because we're going to monkey patch this into other libraries Rails, we
@@ -98,7 +102,7 @@ module Errgonomic
       # message
       # @example
       #   Some(1).expect!("msg") # => 1
-      #   None().expect!("msg") # => raise Errgonomic::ExpectError, "msg"
+      #   None().expect!("here's why this failed") # => raise Errgonomic::ExpectError, "here's why this failed"
       def expect!(msg)
         raise Errgonomic::ExpectError, msg if none?
 
@@ -114,6 +118,16 @@ module Errgonomic
 
         value
       end
+
+      # # returns the inner value if present, else returns the default value
+      # # @example
+      # #   Some(1).unwrap_or(2) # => 1
+      # #   None().unwrap_or(2) # => 2
+      # def unwrap_or_default
+      #   self.class.respond_to?(:default) or raise
+      #   return self.class.default if none?
+      #   value
+      # end
 
       # returns the inner value if present, else returns the result of the
       # provided block
@@ -302,6 +316,7 @@ module Errgonomic
       #   Some(2).zip_with(Some(3)) { |a, b| a + b } # => Some(5)
       def zip_with(other, &block)
         return None() unless some? && other.some?
+
         other = block.call(value, other.value)
         Some(other)
       end
@@ -314,8 +329,6 @@ module Errgonomic
       # take
       # take_if
       # replace
-      # zip
-      # zip_with
     end
 
     # Represent a value
