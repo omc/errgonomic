@@ -251,7 +251,8 @@ module Errgonomic
       def map(&block)
         return self if err?
 
-        Ok(block.call(value))
+        @value = block.call(value)
+        self
       end
     end
 
