@@ -1,7 +1,7 @@
 PATH
   remote: .
   specs:
-    errgonomic (0.3.0)
+    errgonomic (0.4.0)
       concurrent-ruby (~> 1.0)
 
 GEM
@@ -155,4 +155,4 @@ DEPENDENCIES
   yard-doctest (~> 0.1)
 
 BUNDLED WITH
-   2.6.7
+   2.6.6
