@@ -77,9 +77,9 @@ module Errgonomic
       #
       # @example
       #   Ok(1).unwrap! # => 1
-      #   Err(:c).unwrap! # => raise Errgonomic::UnwrapError, "value is an Err"
+      #   Err(:c).unwrap! # => raise Errgonomic::UnwrapError.new("value is an Err", :c)
       def unwrap!
-        raise Errgonomic::UnwrapError, 'value is an Err' unless ok?
+        raise Errgonomic::UnwrapError.new('value is an Err', @value) unless ok?
 
         @value
       end
@@ -175,6 +175,8 @@ module Errgonomic
       # Sorry about that, hopefully it helps your tests. Better than ambiguous
       # downstream "undefined method" errors, probably.
       #
+      # TODO yield the Err
+      #
       # @param block [Proc]
       #
       # @example
@@ -218,6 +220,39 @@ module Errgonomic
         return value if ok?
 
         block.call(self)
+      end
+
+      # Calls the function with the inner error value, if Err, but returns the
+      # original Result.
+      #
+      # @example
+      #   tapped = false
+      #   Ok(1).tap_err { |err| tapped = err } # => Ok(1)
+      #   tapped # => false
+      #   Err(:nope).tap_err { |err| tapped = err } # => Err(:nope)
+      #   tapped # => :nope
+      def tap_err(&block)
+        block.call(value) if err?
+        self
+      end
+
+      # Calls the function with the inner ok value, if Ok, while returning the
+      # original Result.
+      def tap_ok(&block)
+        block.call(value) if ok?
+        self
+      end
+
+      # Map the Ok(a) to an Ok(b), preserving the Err
+      #
+      # @example
+      #   Err(:broken).map { |_val| :nominal } # => Err(:broken)
+      #   Ok(:plausible).map { |_val| :success } # => Ok(:success)
+      def map(&block)
+        return self if err?
+
+        @value = block.call(value)
+        self
       end
     end
 

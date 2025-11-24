@@ -27,7 +27,12 @@ module Errgonomic
 
   class TypeMismatchError < Error; end
 
-  class UnwrapError < Error; end
+  class UnwrapError < Error
+    def initialize(msg, value)
+      super(msg)
+      @value = value
+    end
+  end
 
   class ExpectError < Error; end
 
