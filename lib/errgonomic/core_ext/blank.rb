@@ -2,6 +2,7 @@
 
 require 'concurrent/map'
 
+# If we're not already working with blank?, et al, then add them.
 class Object
   # An object is blank if it's false, empty, or a whitespace string.
   # For example, +nil+, '', '   ', [], {}, and +false+ are all blank.
@@ -47,6 +48,7 @@ class Object
   end
 end
 
+# If we're not working with blank?, et al, then add them.
 class NilClass
   # +nil+ is blank:
   #
@@ -62,6 +64,7 @@ class NilClass
   end
 end
 
+# If we're not working with blank?, et al, then add them.
 class FalseClass
   # +false+ is blank:
   #
@@ -77,6 +80,7 @@ class FalseClass
   end
 end
 
+# If we're not working with blank?, et al, then add them.
 class TrueClass
   # +true+ is not blank:
   #
@@ -92,6 +96,7 @@ class TrueClass
   end
 end
 
+# If we're not working with blank?, et al, then add them.
 class Array
   # An array is blank if it's empty:
   #
@@ -106,6 +111,7 @@ class Array
   end
 end
 
+# If we're not working with blank?, et al, then add them.
 class Hash
   # A hash is blank if it's empty:
   #
@@ -120,6 +126,7 @@ class Hash
   end
 end
 
+# If we're not working with blank?, et al, then add them.
 class Symbol
   # A Symbol is blank if it's empty:
   #
@@ -132,6 +139,7 @@ class Symbol
   end
 end
 
+# If we're not working with blank?, et al, then add them.
 class String
   BLANK_RE = /\A[[:space:]]*\z/
   ENCODED_BLANKS = Concurrent::Map.new do |h, enc|

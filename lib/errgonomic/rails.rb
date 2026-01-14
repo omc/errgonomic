@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 require_relative 'option'
 require_relative 'rails/active_record_optional'
 require_relative 'rails/active_record_delegate_optional'

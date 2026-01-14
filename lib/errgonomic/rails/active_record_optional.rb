@@ -44,21 +44,28 @@ end
 
 module Errgonomic
   module Option
+    # Within the Rails context we want to treat present? and blank? as if they are some? and none?
     class Any
       alias some? present?
       alias none? blank?
     end
 
+    # A few very specific methods that Rails will invoke against the Some return
+    # value of an attribute. I would prefer not to have to set these, but my
+    # preference to avoid monkey-patching even deeper parts of Rails is
+    # stronger.
     class Some
       delegate :marked_for_destruction?, to: :value
       delegate :persisted?, to: :value
       delegate :touch_later, to: :value
 
       def to_s
-        raise "Attempted to convert Some to String, please use Option API to safely work with internal value -- #{value}"
+        raise 'Attempted to convert Some to String, ' \
+              "please use Option API to safely work with internal value -- #{value}"
       end
     end
 
+    # Let Rails pretend that a None is nil. This is a monkeypatch level hack.
     class None
       def nil?
         true
@@ -71,6 +78,10 @@ module Errgonomic
   end
 end
 
+# Automatically unwrap for ActiveRecord type_cast so it can convert values into
+# Ruby data types for database stuff. This is another monkeypatch to get out of
+# the way of ActiveRecord assumptions and avoid patching deeper bits of
+# functionality.
 module ActiveRecordOptionShim
   def type_cast(value)
     case value
@@ -86,12 +97,14 @@ end
 
 ActiveRecord::ConnectionAdapters::Quoting.prepend(ActiveRecordOptionShim)
 
+# Support a generic +to_option+ method
 class NilClass
   def to_option
     None()
   end
 end
 
+# Support a generic +to_option+ method
 class Object
   def to_option
     Some(self)

@@ -1,1 +1,15 @@
-require: rubocop-yard
+plugins: rubocop-yard
+
+Naming/MethodName:
+  AllowedPatterns:
+    - '\AOk\Z'
+    - '\AErr\Z'
+    - '\ASome\Z'
+    - '\ANone\Z'
+
+Metrics/ClassLength:
+  Max: 150
+
+Lint/MissingSuper:
+  AllowedParentClasses:
+    - Any
