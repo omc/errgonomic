@@ -19,9 +19,12 @@ module Errgonomic
       #   h = Errgonomic::Enumerable::OptionalHash.new
       #   h[:color] = :blue
       #   h[:color] #=> Some(:blue)
+      #   h[:butwhy] = nil
+      #   h[:butwhy] # => Some(nil)
       def [](key)
-        obj = super(key)
-        obj.nil? ? None() : Some(obj)
+        return None() unless key?(key)
+
+        Some(super(key))
       end
 
       # Similar to +Hash#dig+ but wrapped in an Option.
