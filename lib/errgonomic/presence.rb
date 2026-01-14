@@ -5,6 +5,9 @@
 # gem a dependency.
 require_relative './core_ext/blank' unless Object.methods.include?(:blank?)
 
+# Big noisy exceptions based on object presence. Helpful for tests or anywhere
+# else one may want to set strong assertions on expected constraints. Like a
+# very basic implementation of Option with more Rails-y naming conventions.
 class Object
   # Returns the receiver if it is present, otherwise raises a NotPresentError.
   # This method is useful to enforce strong expectations, where it is preferable
@@ -18,7 +21,7 @@ class Object
     self
   end
 
-  alias_method :present_or_raise, :present_or_raise!
+  alias present_or_raise present_or_raise!
 
   # Returns the receiver if it is present, otherwise returns the given value. If
   # constructing the default value is expensive, consider using
@@ -61,7 +64,7 @@ class Object
     self
   end
 
-  alias_method :blank_or_raise, :blank_or_raise!
+  alias blank_or_raise blank_or_raise!
 
   # Returns the receiver if it is blank, otherwise returns the given value.
   #

@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+# Similar to 'errgonomic/presence' - very noisy assertions based on an object's
+# underlying type. Useful for enforcing constraints in tests.
 class Object
   # Returns the receiver if it matches the expected type, otherwise raises a TypeMismatchError.
   # This is useful for enforcing type expectations in method arguments.
@@ -56,10 +58,10 @@ class Object
   # @return [Object] The receiver if it is not of the specified type.
   # @example
   #   'hello'.not_type_or_raise!(Integer) #=> "hello"
-  #   123.not_type_or_raise!(Integer, "We dont want an integer!") #=> raise Errgonomic::TypeMismatchError, "We dont want an integer!"
-  #   123.not_type_or_raise!(Integer) #=> raise Errgonomic::TypeMismatchError, "Expected anything but Integer but got Integer"
+  #   123.not_type_or_raise!(Integer, "No gracias!") #=> raise Errgonomic::TypeMismatchError, "No gracias!"
+  #   123.not_type_or_raise!(Integer) #=> raise Errgonomic::TypeMismatchError, "Expected object not to be Integer"
   def not_type_or_raise!(type, message = nil)
-    message ||= "Expected anything but #{type} but got #{self.class}"
+    message ||= "Expected object not to be #{type}"
     raise Errgonomic::TypeMismatchError, message if is_a?(type)
 
     self

@@ -14,7 +14,7 @@ Gem::Specification.new do |spec|
   spec.email = ['nick@onemorecloud.com']
 
   spec.summary = 'Opinionated, ergonomic error handling for Ruby, inspired by Rails and Rust.'
-  spec.description = "Let's blend the Rails 'present' and 'blank' conventions with a few patterns from Rust Option types."
+  spec.description = "Let's blend Rails presence conventions and the Rust Option and Result types."
   spec.homepage = 'https://omc.io/'
   spec.license = 'MIT'
   spec.required_ruby_version = '>= 3.0.0'

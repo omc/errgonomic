@@ -277,6 +277,7 @@ module Errgonomic
       end
     end
 
+    # The error side of a result
     class Err < Any
       class Arbitrary; end
 
