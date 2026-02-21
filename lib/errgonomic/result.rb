@@ -215,11 +215,11 @@ module Errgonomic
       #
       # @example
       #   Ok(1).unwrap_or_else { 2 } # => 1
-      #   Err(:v).unwrap_or_else { :w } # => :w
+      #   Err("foo").unwrap_or_else { |s| s.length } # => 3
       def unwrap_or_else(&block)
         return value if ok?
 
-        block.call(self)
+        block.call(value)
       end
 
       # Calls the function with the inner error value, if Err, but returns the

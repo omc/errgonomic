@@ -1,5 +1,9 @@
 ## [Unreleased]
 
+## [0.4.1] - 2025-02-20
+
+- Bugfix: `unwrap_or_else` yields the inner error
+
 ## [0.2.0] - 2025-05-01
 
 - Type assertions: `type_or_raise!`, `type_or`
