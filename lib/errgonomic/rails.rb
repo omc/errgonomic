@@ -2,6 +2,8 @@ require_relative 'option'
 require_relative 'rails/active_record_optional'
 require_relative 'rails/active_record_delegate_optional'
 
+require 'rails/railtie'
+
 module Errgonomic
   # Slightly more convenient access to the setup functions:
   # Errgonomic::Rails.setup_before and Errgonomic::Rails.setup_after
@@ -17,17 +19,7 @@ module Errgonomic
     # the class is first evaluated, so that it can define its associations for
     # later reflection.
     def self.setup_after
-      Zeitwerk::Loader.eager_load_all
-      setupable = defined?(ApplicationRecord) ? ApplicationRecord : ActiveRecord::Base
-      setupable.descendants.each do |model|
-        next unless begin
-          model.table_exists?
-        rescue StandardError
-          false
-        end
-
-        model.include Errgonomic::Rails::ActiveRecordOptional
-      end
+      # todo
     end
   end
 

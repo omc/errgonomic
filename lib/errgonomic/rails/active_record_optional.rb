@@ -97,3 +97,18 @@ class Object
     Some(self)
   end
 end
+
+module Errgonomic
+  module Rails
+    module ActiveRecordQuoting
+      def quote(value)
+        return super(value) unless value.is_a?(Errgonomic::Option::Any)
+
+        value.map { |val| super(val) }
+             .unwrap_or_else { super(nil) }
+      end
+    end
+  end
+end
+
+ActiveRecord::ConnectionAdapters::Quoting.prepend(Errgonomic::Rails::ActiveRecordQuoting)

@@ -50,11 +50,9 @@ module Errgonomic
       #   Err(:a).ok_and? { |_| true } # => false
       #   Err(:b).ok_and? { |_| false } # => false
       def ok_and?(&block)
-        if ok?
-          !!block.call(value)
-        else
-          false
-        end
+        return false if err?
+
+        !!block.call(value)
       end
 
       # Return true if the inner value is an Err and the result of the block is

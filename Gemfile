@@ -6,14 +6,15 @@ source 'https://rubygems.org'
 gemspec
 
 group :development do
+  gem 'activerecord'
+  gem 'minitest'
+  gem 'rails'
   gem 'rake', '~> 13.0'
   gem 'rspec', '~> 3.0'
   gem 'rubocop'
   gem 'rubocop-yard'
   gem 'solargraph'
-  gem 'activerecord'
   gem 'sqlite3'
-  gem 'minitest'
 end
 
 # gem "standard", "~> 1.3"
