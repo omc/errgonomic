@@ -321,6 +321,26 @@ module Errgonomic
         Some(other)
       end
 
+      # Refuse to serialize an unwrapped Option as a String. Options must be
+      # correctly handled to access their inner value.
+      #
+      # @example
+      #   None().to_s # => raise Errgonomic::SerializeError, "cannot serialize an unwrapped Option"
+      def to_s
+        raise Errgonomic::SerializeError, 'cannot serialize an unwrapped Option'
+      end
+
+      # Refuse to serialize an unwrapped Option as JSON. Not only should we
+      # require that options be correctly handled to access their inner value,
+      # but without this we will get undefined structures from default
+      # Object#to_json implementations.
+      #
+      # @example
+      #   None().to_json # => raise Errgonomic::SerializeError, "cannot serialize an unwrapped Option"
+      def to_json(*_args)
+        raise Errgonomic::SerializeError, 'cannot serialize an unwrapped Option'
+      end
+
       # filter
       # xor
       # insert

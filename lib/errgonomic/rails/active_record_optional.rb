@@ -53,19 +53,11 @@ module Errgonomic
       delegate :marked_for_destruction?, to: :value
       delegate :persisted?, to: :value
       delegate :touch_later, to: :value
-
-      def to_s
-        raise "Attempted to convert Some to String, please use Option API to safely work with internal value -- #{value}"
-      end
     end
 
     class None
       def nil?
         true
-      end
-
-      def to_s
-        raise 'Cannot convert None to String - please use Option API to safely work with internal value'
       end
     end
   end

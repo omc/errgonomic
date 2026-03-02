@@ -23,9 +23,11 @@ require_relative 'errgonomic/rails' if defined?(Rails::Railtie)
 module Errgonomic
   class Error < StandardError; end
 
+  class TypeError < ::TypeError; end
+
   class NotPresentError < Error; end
 
-  class TypeMismatchError < Error; end
+  class TypeMismatchError < TypeError; end
 
   class UnwrapError < Error
     def initialize(msg, value)
@@ -41,6 +43,8 @@ module Errgonomic
   class ResultRequiredError < Error; end
 
   class NotComparableError < StandardError; end
+
+  class SerializeError < TypeError; end
 
   # A little bit of control over how pedantic we are in our runtime type checks.
   def self.give_me_ambiguous_downstream_errors?
