@@ -252,6 +252,28 @@ module Errgonomic
         @value = block.call(value)
         self
       end
+
+      # Refuse to serialize an unwrapped Result as a String. Results must be
+      # correctly handled to access their inner value.
+      #
+      # @example
+      #   Ok("").to_s # => raise Errgonomic::SerializeError, "cannot serialize an unwrapped Result"
+      #   Err("").to_s # => raise Errgonomic::SerializeError, "cannot serialize an unwrapped Result"
+      def to_s
+        raise Errgonomic::SerializeError, 'cannot serialize an unwrapped Result'
+      end
+
+      # Refuse to serialize an unwrapped Result as JSON. Not only should we
+      # require that Results be correctly handled to access their inner value,
+      # but without this we will get undefined structures from default
+      # Object#to_json implementations.
+      #
+      # @example
+      #   Ok("").to_json # => raise Errgonomic::SerializeError, "cannot serialize an unwrapped Result"
+      #   Err("").to_json # => raise Errgonomic::SerializeError, "cannot serialize an unwrapped Result"
+      def to_json(*_args)
+        raise Errgonomic::SerializeError, 'cannot serialize an unwrapped Result'
+      end
     end
 
     # The Ok variant.
