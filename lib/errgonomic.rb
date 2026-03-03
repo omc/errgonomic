@@ -27,7 +27,7 @@ module Errgonomic
 
   class NotPresentError < Error; end
 
-  class TypeMismatchError < TypeError; end
+  class TypeMismatchError < Error; end
 
   class UnwrapError < Error
     def initialize(msg, value)
