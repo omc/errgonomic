@@ -30,7 +30,9 @@ module Errgonomic
   class TypeMismatchError < Error; end
 
   class UnwrapError < Error
-    def initialize(msg, value)
+    attr_reader :value
+
+    def initialize(msg, value = nil)
       super(msg)
       @value = value
     end
@@ -47,8 +49,9 @@ module Errgonomic
   class SerializeError < TypeError; end
 
   # A little bit of control over how pedantic we are in our runtime type checks.
+  # Default is false: we are pedantic and raise errors on type mismatches.
   def self.give_me_ambiguous_downstream_errors?
-    @give_me_ambiguous_downstream_errors || true
+    !!@give_me_ambiguous_downstream_errors
   end
 
   # You can opt out of the pedantic runtime checks for lazy block evaluation,

@@ -2,8 +2,11 @@
 
 require 'bundler/gem_tasks'
 
-require 'rspec/core/rake_task'
-RSpec::Core::RakeTask.new(:spec)
+require 'rake/testtask'
+Rake::TestTask.new(:test) do |t|
+  t.libs << 'test'
+  t.test_files = FileList['test/**/*_test.rb']
+end
 
 require 'yard/doctest/rake'
 YARD::Doctest::RakeTask.new do |task|
@@ -11,4 +14,4 @@ YARD::Doctest::RakeTask.new do |task|
   task.pattern = 'lib/**/*.rb'
 end
 
-task default: %i[spec yard:doctest]
+task default: %i[test yard:doctest]

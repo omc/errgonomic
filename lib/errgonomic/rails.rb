@@ -15,12 +15,9 @@ module Errgonomic
       ActiveRecord::Base.include(Errgonomic::Rails::ActiveRecordDelegateOptional)
     end
 
-    # Wrapping optional associations requires that we include the module after
-    # the class is first evaluated, so that it can define its associations for
-    # later reflection.
-    def self.setup_after
-      # todo
-    end
+    # Models opt in to ActiveRecordOptional individually via
+    # `include Errgonomic::Rails::ActiveRecordOptional`.
+    def self.setup_after; end
   end
 
   # Hook into Rails with a Railtie

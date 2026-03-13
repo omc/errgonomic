@@ -36,6 +36,7 @@ Errgonomic::Rails.setup_before
 
 class Author < ActiveRecord::Base
   has_many :books
+  include Errgonomic::Rails::ActiveRecordOptional
 end
 
 class Book < ActiveRecord::Base
@@ -43,17 +44,15 @@ class Book < ActiveRecord::Base
   has_many :reviewers, through: :reviews, source: :user
   belongs_to :author, optional: true
 
+  include Errgonomic::Rails::ActiveRecordOptional
   delegate_optional :name, to: :author, prefix: true
 end
 
 class Genre < ActiveRecord::Base
   has_many :books
   belongs_to :parent, class_name: 'Genre', optional: true
+  include Errgonomic::Rails::ActiveRecordOptional
 end
-
-# Optional associations have to be defined after the model is evaluated so we
-# can reflect on those associations.
-Errgonomic::Rails.setup_after
 
 class BugTest < Minitest::Test
   def test_optional_attributes
