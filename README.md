@@ -55,7 +55,21 @@ TODO: Write usage instructions here
 
 ## Development
 
-After checking out the repo, run `bin/setup` to install dependencies. Then, run `rake spec` to run the tests. You can also run `bin/console` for an interactive prompt that will allow you to experiment.
+After checking out the repo, run `bin/setup` to install dependencies. You can also run `bin/console` for an interactive prompt that will allow you to experiment.
+
+This project encourages **red, green, refactor** when making changes. First, add or change a test that captures the desired behavior; next, run the tests to observe the failure message, confirming the test is useful; next, make the smallest code change(s) to make the test pass. Once tests pass, review your diff and look for opportunities to simplify or improve abstractions; make changes and iterate, running tests on each change to guard against regressions.
+
+Run the doctest suite with:
+
+```bash
+nix develop -c yard doctest
+```
+
+Run all tests with:
+
+```
+nix develop -c rake
+```
 
 To install this gem onto your local machine, run `bundle exec rake install`. To release a new version, update the version number in `version.rb`, and then run `bundle exec rake release`, which will create a git tag for the version, push git commits and the created tag, and push the `.gem` file to [rubygems.org](https://rubygems.org).
 

@@ -25,3 +25,5 @@ jobs:
           bundler-cache: true
       - name: Run yard doctest
         run: bundle exec yard doctest
+      - name: Run rake test
+        run: bundle exec rake test
