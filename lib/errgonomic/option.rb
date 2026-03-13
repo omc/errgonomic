@@ -257,7 +257,7 @@ module Errgonomic
         return self if some?
 
         val = block.call
-        if !val.is_a?(Errgonomic::Option::Any) && Errgonomic.give_me_ambiguous_downstream_errors?
+        if !val.is_a?(Errgonomic::Option::Any) && !Errgonomic.give_me_ambiguous_downstream_errors?
           raise Errgonomic::ArgumentError.new, "block must return an Option, was #{val.class.name}"
         end
 
@@ -275,16 +275,17 @@ module Errgonomic
         other
       end
 
-      # If self is Some, call the given block and return its value. Block most return an Option.
+      # If self is Some, call the given block with the inner value and return
+      # its result. Block must return an Option.
       #
       # @example
-      #   None().and_then { Some(1) } # => None()
-      #   Some(2).and_then { Some(3) } # => Some(3)
+      #   None().and_then { |x| Some(x + 1) } # => None()
+      #   Some(2).and_then { |x| Some(x + 1) } # => Some(3)
       def and_then(&block)
         return self if none?
 
-        val = block.call
-        if Errgonomic.give_me_ambiguous_downstream_errors? && !val.is_a?(Errgonomic::Option::Any)
+        val = block.call(value)
+        if !Errgonomic.give_me_ambiguous_downstream_errors? && !val.is_a?(Errgonomic::Option::Any)
           raise Errgonomic::ArgumentError.new, "block must return an Option, was #{val.class.name}"
         end
 

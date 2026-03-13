@@ -142,7 +142,7 @@ module Errgonomic
         return self if err?
 
         res = block.call(value)
-        if !res.is_a?(Errgonomic::Result::Any) && Errgonomic.give_me_ambiguous_downstream_errors?
+        if !res.is_a?(Errgonomic::Result::Any) && !Errgonomic.give_me_ambiguous_downstream_errors?
           raise Errgonomic::ArgumentError, 'and_then block must return a Result'
         end
 
@@ -173,20 +173,18 @@ module Errgonomic
       # Sorry about that, hopefully it helps your tests. Better than ambiguous
       # downstream "undefined method" errors, probably.
       #
-      # TODO yield the Err
-      #
       # @param block [Proc]
       #
       # @example
-      #   Ok(1).or_else { Ok(2) } # => Ok(1)
-      #   Err(:o).or_else { Ok(1) } # => Ok(1)
-      #   Err(:q).or_else { Err(:r) } # => Err(:r)
-      #   Err(:s).or_else { "oops" } # => raise Errgonomic::ArgumentError, "or_else block must return a Result"
+      #   Ok(1).or_else { |e| Ok(2) } # => Ok(1)
+      #   Err(:o).or_else { |e| Ok(1) } # => Ok(1)
+      #   Err(:q).or_else { |e| Err(:r) } # => Err(:r)
+      #   Err(:s).or_else { |e| "oops" } # => raise Errgonomic::ArgumentError, "or_else block must return a Result"
       def or_else(&block)
         return self if ok?
 
-        res = block.call(self)
-        if !res.is_a?(Errgonomic::Result::Any) && Errgonomic.give_me_ambiguous_downstream_errors?
+        res = block.call(value)
+        if !res.is_a?(Errgonomic::Result::Any) && !Errgonomic.give_me_ambiguous_downstream_errors?
           raise Errgonomic::ArgumentError, 'or_else block must return a Result'
         end
 
@@ -249,8 +247,7 @@ module Errgonomic
       def map(&block)
         return self if err?
 
-        @value = block.call(value)
-        self
+        Ok(block.call(value))
       end
 
       # Refuse to serialize an unwrapped Result as a String. Results must be
