@@ -257,7 +257,7 @@ module Errgonomic
         return self if some?
 
         val = block.call
-        if !val.is_a?(Errgonomic::Option::Any) && !Errgonomic.give_me_ambiguous_downstream_errors?
+        if !val.is_a?(Errgonomic::Option::Any) && Errgonomic.give_me_ambiguous_downstream_errors?
           raise Errgonomic::ArgumentError.new, "block must return an Option, was #{val.class.name}"
         end
 

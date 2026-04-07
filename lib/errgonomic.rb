@@ -15,6 +15,9 @@ require_relative 'errgonomic/result'
 # Rails fu
 require_relative 'errgonomic/rails' if defined?(Rails::Railtie)
 
+# General Ruby utilities o7
+require_relative 'errgonomic/enumerable'
+
 # Errgonomic adds opinionated abstractions to handle errors in a way that blends
 # Rust and Ruby ergonomics. This library leans on Rails conventions for some
 # presence-related methods; when in doubt, make those feel like Rails. It also
@@ -49,9 +52,9 @@ module Errgonomic
   class SerializeError < TypeError; end
 
   # A little bit of control over how pedantic we are in our runtime type checks.
-  # Default is false: we are pedantic and raise errors on type mismatches.
+  # Default is true: we are pedantic and raise errors on type mismatches.
   def self.give_me_ambiguous_downstream_errors?
-    !!@give_me_ambiguous_downstream_errors
+    !@give_me_ambiguous_downstream_errors
   end
 
   # You can opt out of the pedantic runtime checks for lazy block evaluation,
