@@ -1,7 +1,7 @@
 PATH
   remote: .
   specs:
-    errgonomic (0.6.0)
+    errgonomic (0.7.0)
       concurrent-ruby (~> 1.0)
 
 GEM
