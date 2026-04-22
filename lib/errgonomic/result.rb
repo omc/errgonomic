@@ -250,6 +250,17 @@ module Errgonomic
         Ok(block.call(value))
       end
 
+      # Map the Err(e) to an Err(f), preserving the Ok
+      #
+      # @example
+      #   Ok(:Alice).map_err { |_e| :Bob } # => Ok(:Alice)
+      #   Err(:bob).map_err { |e| e.capitalize } # => Err(:Bob)
+      def map_err(&block)
+        return self if ok?
+
+        Err(block.call(value))
+      end
+
       # Refuse to serialize an unwrapped Result as a String. Results must be
       # correctly handled to access their inner value.
       #
@@ -271,6 +282,30 @@ module Errgonomic
       def to_json(*_args)
         raise Errgonomic::SerializeError, 'cannot serialize an unwrapped Result'
       end
+
+      # @example simple pattern match with variable capture of the value
+      #   result = Errgonomic::Result::Ok.new(1)
+      #   case result
+      #   in Errgonomic::Result::Ok, value
+      #     "Measurement is #{value}"
+      #   in Errgonomic::Result::Err, err
+      #     "Measurement is not available"
+      #   end # => "Measurement is 1"
+      #
+      # @example more advanced pattern match against the kind of value
+      #   result = Errgonomic::Result::Err.new(StandardError.new("nope"))
+      #   case result
+      #   in Errgonomic::Result::Ok, value
+      #     "Measurement is #{value}"
+      #   in Errgonomic::Result::Err, String => msg
+      #     "Measurement failed with a message: #{msg}"
+      #   in Errgonomic::Result::Err, Exception => e
+      #     "Measurement produced an exception -- #{e.class}: #{e}"
+      #   end # => "Measurement produced an exception -- StandardError: nope"
+      def deconstruct
+        [self, value]
+      end
+
     end
 
     # The Ok variant.
