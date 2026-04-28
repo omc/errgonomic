@@ -12,6 +12,9 @@ require_relative 'errgonomic/type'
 require_relative 'errgonomic/option'
 require_relative 'errgonomic/result'
 
+# some extensions on true and false
+require_relative 'errgonomic/bool'
+
 # Rails fu
 require_relative 'errgonomic/rails' if defined?(Rails::Railtie)
 
