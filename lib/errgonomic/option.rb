@@ -343,7 +343,22 @@ module Errgonomic
       end
 
       # filter
-      # xor
+
+      # Return Some when either self or other are Some, otherwise return None
+      # when both are None or both are Some.
+      #
+      # @example
+      #   Some(:left).xor(Some(:right)) # => None()
+      #   Some(:left).xor(None()) #=> Some(:left)
+      #   None().xor(Some(:right)) #=> Some(:right)
+      #
+      def xor(other)
+        return self if some? && other.none?
+        return other if other.some? && none?
+
+        None()
+      end
+
       # insert
       # get_or_insert
       # get_or_insert_with
