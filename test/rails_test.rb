@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 require 'active_record'
 require 'minitest/autorun'
 require 'logger'
@@ -52,6 +54,7 @@ class Genre < ActiveRecord::Base
   has_many :books
   belongs_to :parent, class_name: 'Genre', optional: true
   include Errgonomic::Rails::ActiveRecordOptional
+  delegate_optional :name, to: :parent, prefix: true, private: true
 end
 
 class BugTest < Minitest::Test
@@ -74,5 +77,12 @@ class BugTest < Minitest::Test
     book = author.books.create!(title: 'Death\'s End')
     assert book.author_name.some?
     assert_equal author.name, book.author_name.unwrap!
+  end
+
+  def test_private_delegate_optional
+    fiction = Genre.create!(name: 'Fiction')
+    scifi = Genre.create!(name: 'Sci-Fi', parent: fiction)
+    assert_raises(NoMethodError) { scifi.parent_name }
+    assert_equal 'Fiction', scifi.send(:parent_name).unwrap!
   end
 end
