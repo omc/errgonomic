@@ -372,6 +372,7 @@ module Errgonomic
       attr_accessor :value
 
       def initialize(value)
+        super()
         @value = value
       end
 
@@ -384,6 +385,7 @@ module Errgonomic
       end
     end
 
+    # Represent the absence of a value.
     class None < Any
       def some?
         false

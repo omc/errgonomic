@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+# Runtime type assertions for every object: keep the receiver when it matches
+# the expected type, otherwise substitute, compute, or raise.
 class Object
   # Returns the receiver if it matches the expected type, otherwise raises a TypeMismatchError.
   # This is useful for enforcing type expectations in method arguments.
