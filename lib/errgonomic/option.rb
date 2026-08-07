@@ -78,6 +78,27 @@ module Errgonomic
 
       alias none_or? none_or
 
+      # Presence follows the discriminant, not the inner value: Some is
+      # present, None is blank. So Some(false) and Some(nil) are present,
+      # unlike their unwrapped values.
+      #
+      # @example
+      #   Some(1).present? # => true
+      #   Some(false).present? # => true
+      #   Some("").present? # => true
+      #   None().present? # => false
+      def present?
+        some?
+      end
+
+      # @example
+      #   None().blank? # => true
+      #   Some(1).blank? # => false
+      #   Some(nil).blank? # => false
+      def blank?
+        none?
+      end
+
       # return an Array with the contained value, if any
       # @example
       #   Some(1).to_a # => [1]
