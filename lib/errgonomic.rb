@@ -50,6 +50,11 @@ module Errgonomic
 
   class ResultRequiredError < Error; end
 
+  # Raised when a wrapped ActiveRecord attribute reader re-enters itself on
+  # the same record, catching runaway recursion at the first repeated frame
+  # instead of a SystemStackError thousands of frames later.
+  class RecursiveOptionalReadError < Error; end
+
   class NotComparableError < StandardError; end
 
   class SerializeError < TypeError; end

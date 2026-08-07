@@ -18,8 +18,19 @@ module Errgonomic
         @errgonomic_optionals.each do |name|
           class_eval <<-RUBY, __FILE__, __LINE__ + 1
             def #{name}
-              raise "stack too deep" if caller.length > 1024
-              val = super
+              reads = Thread.current[:errgonomic_optional_reads] ||= {}
+              key = [object_id, :#{name}]
+              if reads[key]
+                raise Errgonomic::RecursiveOptionalReadError,
+                      "\#{self.class}##{name} re-entered itself; something beneath this reader reads it again"
+              end
+
+              reads[key] = true
+              begin
+                val = super
+              ensure
+                reads.delete(key)
+              end
               val.nil? ? Errgonomic::Option::None.new : Errgonomic::Option::Some.new(val)
             end
           RUBY
