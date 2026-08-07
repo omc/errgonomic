@@ -33,6 +33,50 @@ module Errgonomic
         value <=> other.value
       end
 
+      # Rust spellings we accept but do not advertise: they delegate to the
+      # Ruby-idiomatic predicate and nudge the caller there via stderr.
+      RUST_SPELLINGS = {
+        is_ok: :ok?,
+        is_err: :err?,
+        is_ok_and: :ok_and?,
+        is_err_and: :err_and?
+      }.freeze
+
+      # A Result deliberately forwards nothing to its inner value, so a miss
+      # here is almost always someone treating the container as its contents.
+      # Teach the route out instead of leaving a bare NoMethodError. Rust
+      # spellings of the predicates delegate, with a nudge on stderr.
+      #
+      # @example
+      #   begin
+      #     Ok(5) + 1
+      #   rescue NoMethodError => e
+      #     e.class
+      #   end # => Errgonomic::UnwrappedAccessError
+      #   Ok(5).respond_to?(:+) # => false
+      #   Ok(1).is_ok_and(&:odd?) # => true
+      #   Err(:a).is_err # => true
+      #   Ok(1).respond_to?(:is_ok) # => true
+      def method_missing(name, *args, &block)
+        if (canonical = RUST_SPELLINGS[name])
+          warn "Errgonomic: `#{name}` is the Rust spelling; prefer `#{canonical}`. Delegating."
+          return public_send(canonical, *args, &block)
+        end
+
+        raise Errgonomic::UnwrappedAccessError.new(<<~MSG, name)
+          undefined method `#{name}' for #{inspect}, a Result, which does not forward methods to its inner value.
+          Reach for a combinator instead:
+            map, map_err, and_then, or_else: transform the value or the error
+            unwrap_or, unwrap_or_else: supply a fallback
+            ok_and?, err_and?: test a predicate against the inner value
+          unwrap!, unwrap_err!, and expect! also exist, but are intended for tests rather than application code.
+        MSG
+      end
+
+      def respond_to_missing?(name, include_private = false)
+        RUST_SPELLINGS.key?(name) || super
+      end
+
       # Equality comparison for Result objects is based on value not reference.
       #
       # @param other [Object]

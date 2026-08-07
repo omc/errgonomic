@@ -7,9 +7,50 @@ module Errgonomic
     class Any
       include Comparable
 
-      # def method_missing(_name, *_args)
-      #   raise 'do it right noob'
-      # end
+      # Rust spellings we accept but do not advertise: they delegate to the
+      # Ruby-idiomatic predicate and nudge the caller there via stderr.
+      RUST_SPELLINGS = {
+        is_some: :some?,
+        is_none: :none?,
+        is_some_and: :some_and?,
+        is_none_or: :none_or?
+      }.freeze
+
+      # An Option deliberately forwards nothing to its inner value, so a miss
+      # here is almost always someone treating the container as its contents.
+      # Teach the route out instead of leaving a bare NoMethodError. Rust
+      # spellings of the predicates delegate, with a nudge on stderr.
+      #
+      # @example
+      #   begin
+      #     Some(5) + 1
+      #   rescue NoMethodError => e
+      #     e.class
+      #   end # => Errgonomic::UnwrappedAccessError
+      #   Some(5).respond_to?(:+) # => false
+      #   Some(1).is_some_and { |x| x > 0 } # => true
+      #   None().is_none # => true
+      #   Some(5).respond_to?(:is_some) # => true
+      def method_missing(name, *args, &block)
+        if (canonical = RUST_SPELLINGS[name])
+          warn "Errgonomic: `#{name}` is the Rust spelling; prefer `#{canonical}`. Delegating."
+          return public_send(canonical, *args, &block)
+        end
+
+        raise Errgonomic::UnwrappedAccessError.new(<<~MSG, name)
+          undefined method `#{name}' for #{inspect}, an Option, which does not forward methods to its inner value.
+          Reach for a combinator instead:
+            map, and_then, filter: transform the value if present
+            unwrap_or, unwrap_or_else: supply a fallback
+            ok_or, ok_or_else: convert to a Result
+            some_and?, none_or?: test a predicate against the inner value
+          unwrap! and expect! also exist, but are intended for tests rather than application code.
+        MSG
+      end
+
+      def respond_to_missing?(name, include_private = false)
+        RUST_SPELLINGS.key?(name) || super
+      end
 
       # An Option equals another Option of the same class with an equal inner
       # value. Anything else, including nil and the raw inner value, is not
