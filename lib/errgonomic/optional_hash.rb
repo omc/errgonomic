@@ -67,6 +67,11 @@ module Errgonomic
     #   h.dig(:people, 0, :name) # => Some("Ada")
     #   h.dig(:people, 1, :name) # => None()
     #
+    # @example a nested wrapper walks the rest of the path itself
+    #   h = { person: { name: 'Ada' }.into_optional }.into_optional
+    #   h.dig(:person, :name) # => Some("Ada")
+    #   h.dig(:person, :nickname) # => None()
+    #
     # @example digging into a non-collection is an error, not a None
     #   h = { name: 'Ada' }.into_optional
     #   h.dig(:name, :length) # => raise Errgonomic::TypeMismatchError, "cannot dig into String"
