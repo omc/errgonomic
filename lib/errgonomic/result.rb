@@ -33,6 +33,32 @@ module Errgonomic
         value <=> other.value
       end
 
+      # A Result deliberately forwards nothing to its inner value, so a miss
+      # here is almost always someone treating the container as its contents.
+      # Teach the route out instead of leaving a bare NoMethodError.
+      #
+      # @example
+      #   begin
+      #     Ok(5) + 1
+      #   rescue NoMethodError => e
+      #     e.class
+      #   end # => Errgonomic::UnwrappedAccessError
+      #   Ok(5).respond_to?(:+) # => false
+      def method_missing(name, *_args)
+        raise Errgonomic::UnwrappedAccessError.new(<<~MSG, name)
+          undefined method `#{name}' for #{inspect}, a Result, which does not forward methods to its inner value.
+          Reach for a combinator instead:
+            map, map_err, and_then, or_else: transform the value or the error
+            unwrap_or, unwrap_or_else: supply a fallback
+            ok_and?, err_and?: test a predicate against the inner value
+          unwrap!, unwrap_err!, and expect! also exist, but are intended for tests rather than application code.
+        MSG
+      end
+
+      def respond_to_missing?(name, include_private = false)
+        super
+      end
+
       # Equality comparison for Result objects is based on value not reference.
       #
       # @param other [Object]

@@ -57,6 +57,11 @@ module Errgonomic
 
   class NotComparableError < StandardError; end
 
+  # Raised when a method missing from Option or Result is called, with a
+  # message that teaches the combinators. Subclasses NoMethodError so every
+  # rescue path and Ruby-internal probe that expects one keeps working.
+  class UnwrappedAccessError < ::NoMethodError; end
+
   class SerializeError < TypeError; end
 
   # A little bit of control over how pedantic we are in our runtime type checks.

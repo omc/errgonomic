@@ -7,9 +7,32 @@ module Errgonomic
     class Any
       include Comparable
 
-      # def method_missing(_name, *_args)
-      #   raise 'do it right noob'
-      # end
+      # An Option deliberately forwards nothing to its inner value, so a miss
+      # here is almost always someone treating the container as its contents.
+      # Teach the route out instead of leaving a bare NoMethodError.
+      #
+      # @example
+      #   begin
+      #     Some(5) + 1
+      #   rescue NoMethodError => e
+      #     e.class
+      #   end # => Errgonomic::UnwrappedAccessError
+      #   Some(5).respond_to?(:+) # => false
+      def method_missing(name, *_args)
+        raise Errgonomic::UnwrappedAccessError.new(<<~MSG, name)
+          undefined method `#{name}' for #{inspect}, an Option, which does not forward methods to its inner value.
+          Reach for a combinator instead:
+            map, and_then, filter: transform the value if present
+            unwrap_or, unwrap_or_else: supply a fallback
+            ok_or, ok_or_else: convert to a Result
+            some_and?, none_or?: test a predicate against the inner value
+          unwrap! and expect! also exist, but are intended for tests rather than application code.
+        MSG
+      end
+
+      def respond_to_missing?(name, include_private = false)
+        super
+      end
 
       # An Option equals another Option of the same class with an equal inner
       # value. Anything else, including nil and the raw inner value, is not
