@@ -31,7 +31,19 @@ ActiveRecord::Schema.define do
     t.references :parent, foreign_key: { to_table: :genres }
     t.timestamps
   end
+
+  create_table 'credentials', force: :cascade do |t|
+    t.string :access_key, limit: 255
+    t.string :access_secret, limit: 255
+    t.timestamps
+  end
 end
+
+ActiveRecord::Encryption.configure(
+  primary_key: 'test primary key',
+  deterministic_key: 'test deterministic key',
+  key_derivation_salt: 'test key derivation salt'
+)
 
 # Before classes are loaded we need to define helper methods like `delegate_optional`
 Errgonomic::Rails.setup_before
@@ -70,6 +82,13 @@ class LoopyAuthor < ActiveRecord::Base
   self.table_name = 'authors'
   include ReentrantBio
   include Errgonomic::Rails::ActiveRecordOptional
+end
+
+# Encryption adds a length validator that reads the raw attribute, and
+# declares itself after the concern is included, as applications write it.
+class Credential < ActiveRecord::Base
+  include Errgonomic::Rails::ActiveRecordOptional
+  encrypts :access_secret
 end
 
 class BugTest < Minitest::Test
@@ -121,6 +140,20 @@ class BugTest < Minitest::Test
     scifi = Genre.create!(name: 'Sci-Fi', parent: fiction)
     assert_raises(NoMethodError) { scifi.parent_name }
     assert_equal 'Fiction', scifi.send(:parent_name).unwrap!
+  end
+
+  def test_encrypted_attributes_are_left_unwrapped
+    credential = Credential.create!(access_key: 'abc123', access_secret: 'shhh')
+
+    assert_equal 'shhh', credential.access_secret
+    assert_equal 'abc123', credential.access_key.unwrap!
+  end
+
+  def test_encrypted_attributes_may_be_absent
+    credential = Credential.create!(access_key: 'abc123')
+
+    assert_nil credential.access_secret
+    assert credential.reload.access_secret.nil?
   end
 
   private

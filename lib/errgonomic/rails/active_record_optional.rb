@@ -27,8 +27,10 @@ module Errgonomic
         optional_associations = reflect_on_all_associations(:belongs_to)
                                 .select { |r| r.options[:optional] }
                                 .map(&:name)
+        excluded = Array(encrypted_attributes).map(&:to_s)
         optional_attributes = column_names
                               .select { |n| column_for_attribute(n).null }
+                              .reject { |n| excluded.include?(n) }
         @errgonomic_optionals = (optional_attributes + optional_associations)
         @errgonomic_optionals.each do |name|
           class_eval <<-RUBY, __FILE__, __LINE__ + 1
@@ -55,6 +57,23 @@ module Errgonomic
       class_methods do
         def errgonomic_optionals
           @errgonomic_optionals
+        end
+
+        # Encryption surrounds an attribute with machinery that reads the raw
+        # value, including a length validator that calls to_s on it, so a
+        # wrapped encrypted attribute cannot be saved. Declaring encrypts
+        # after the include is the ordinary spelling, so catch it here too and
+        # give the attribute its plain reader back.
+        def encrypts(*names, **options)
+          super.tap { errgonomic_unwrap_optionals(*names) }
+        end
+
+        def errgonomic_unwrap_optionals(*names)
+          names.map(&:to_s).each do |name|
+            next unless @errgonomic_optionals&.delete(name)
+
+            remove_method(name)
+          end
         end
       end
     end
