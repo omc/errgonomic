@@ -11,7 +11,9 @@ end
 require 'yard/doctest/rake'
 YARD::Doctest::RakeTask.new do |task|
   task.doctest_opts = %w[-v]
-  task.pattern = 'lib/**/*.rb'
+  # Expand here: the pattern reaches yard through a shell whose ** means *,
+  # which silently dropped every doctest under lib/errgonomic/*/.
+  task.pattern = FileList['lib/**/*.rb'].join(' ')
 end
 
 task default: %i[test yard:doctest]
