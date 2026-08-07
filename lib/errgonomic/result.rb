@@ -6,10 +6,31 @@ module Errgonomic
     # much logic as possible here, and let Ok and Err handle their
     # initialization and self identification.
     class Any
+      include Comparable
+
       attr_reader :value
 
       def initialize(value)
         @value = value
+      end
+
+      # Results order like Rust's: Ok sorts before any Err, and same variants
+      # order by their inner values. Follows Ruby's <=> convention of
+      # returning nil for incomparable operands, whether the other object is
+      # not a Result or the inner values do not themselves compare.
+      #
+      # @example
+      #   (Ok(1) <=> Ok(2)) # => -1
+      #   (Ok(1) <=> Err(:a)) # => -1
+      #   (Err(:a) <=> Ok(1)) # => 1
+      #   (Err(:a) <=> Err(:b)) # => -1
+      #   (Ok(1) <=> 1) # => nil
+      #   [Err(:a), Ok(2), Ok(1)].sort # => [Ok(1), Ok(2), Err(:a)]
+      def <=>(other)
+        return nil unless other.is_a?(Errgonomic::Result::Any)
+        return ok? ? -1 : 1 if self.class != other.class
+
+        value <=> other.value
       end
 
       # Equality comparison for Result objects is based on value not reference.
