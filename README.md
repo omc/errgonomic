@@ -163,6 +163,17 @@ When `Rails::Railtie` is defined, Errgonomic installs a Railtie with two opt-in 
 
 `Object#to_option` is also available in Rails to lift any value into an Option (`nil.to_option # => None()`).
 
+#### ActiveRecord compromises
+
+ActiveRecord assumes things about accessors that a strict Rust Option cannot satisfy, so the integration carries four deliberate compromises. Everywhere else, treat a departure from Rust's `Option` semantics as a bug; these four are intended:
+
+1. `None#nil?` answers `true`, so ActiveRecord internals and ordinary `.nil?` checks treat an absent value as absent. Equality does not follow suit: `None() == nil` is still `false`.
+2. `Some` delegates `persisted?`, `marked_for_destruction?`, and `touch_later` to its record, so a `Some` can stand in for its record during persistence.
+3. Quoting is patched so an `Option` passed into `where`/`quote` is unwrapped at the SQL boundary.
+4. `SomeValidator` provides a presence-style validation for Option attributes.
+
+The set is closed. If a future integration appears to need a fifth compromise, that is a signal ActiveRecord is pushing back somewhere unmapped, and it warrants a design discussion rather than a quiet patch.
+
 ## Development
 
 After checking out the repo, run `bin/setup` to install dependencies. You can also run `bin/console` for an interactive prompt that will allow you to experiment. The repository is a self-contained Nix flake; with direnv, `direnv allow` puts the right toolchain on your path.
