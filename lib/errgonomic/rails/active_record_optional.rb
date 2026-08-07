@@ -15,8 +15,8 @@ module Errgonomic
     #    None() == nil stays false.
     # 2. Some delegates persisted?, marked_for_destruction?, and touch_later
     #    to its record, so a Some can stand in for it during persistence.
-    # 3. Two quoting prepends unwrap Options at the SQL boundary, so an
-    #    Option can be passed to where/quote.
+    # 3. Quoting and predicate-building prepends unwrap Options at the SQL
+    #    boundary, so an Option can be passed to where/quote.
     # 4. SomeValidator provides a presence-style validation for Option
     #    attributes.
     module ActiveRecordOptional
@@ -136,3 +136,33 @@ module Errgonomic
 end
 
 ActiveRecord::ConnectionAdapters::Quoting.prepend(Errgonomic::Rails::ActiveRecordQuoting)
+
+module Errgonomic
+  module Rails
+    # A hash condition never reaches the quoting layer as its raw value: the
+    # predicate builder hands it to a bind attribute, which serializes it
+    # through the column type and casts an unrecognized object to nil. Unwrap
+    # one step earlier, where every hash condition passes, so a Some binds as
+    # its inner value and a None as nil, which Arel renders as IS NULL.
+    module ActiveRecordPredicateBuilder
+      def build(attribute, value, *args)
+        super(attribute, Errgonomic::Rails.unwrap_options(value), *args)
+      end
+    end
+
+    # Unwrap Options in a query condition, reaching one level into an array
+    # so a list of Options binds like a list of values.
+    def self.unwrap_options(value)
+      case value
+      when Errgonomic::Option::Any
+        value.unwrap_or(nil)
+      when Array
+        value.any? { |v| v.is_a?(Errgonomic::Option::Any) } ? value.map { |v| unwrap_options(v) } : value
+      else
+        value
+      end
+    end
+  end
+end
+
+ActiveRecord::PredicateBuilder.prepend(Errgonomic::Rails::ActiveRecordPredicateBuilder)
