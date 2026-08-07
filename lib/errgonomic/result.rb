@@ -283,6 +283,12 @@ module Errgonomic
         raise Errgonomic::SerializeError, 'cannot serialize an unwrapped Result'
       end
 
+      # pp uses its own object dump unless told otherwise; keep it consistent
+      # with inspect.
+      def pretty_print(pp)
+        pp.text(inspect)
+      end
+
       # @example simple pattern match with variable capture of the value
       #   result = Errgonomic::Result::Ok.new(1)
       #   case result
@@ -326,6 +332,15 @@ module Errgonomic
       def err?
         false
       end
+
+      # Render like Rust's Debug, delegating to the inner value's inspect.
+      #
+      # @example
+      #   Ok(1).inspect # => "Ok(1)"
+      #   Ok("x").inspect # => "Ok(\"x\")"
+      def inspect
+        "Ok(#{value.inspect})"
+      end
     end
 
     # The Err variant.
@@ -357,6 +372,17 @@ module Errgonomic
       #   Err(:A).ok? # => false
       def ok?
         false
+      end
+
+      # Render like Rust's Debug; a value-less Err renders bare.
+      #
+      # @example
+      #   Err(:nope).inspect # => "Err(:nope)"
+      #   Err().inspect # => "Err()"
+      def inspect
+        return 'Err()' if value == Arbitrary
+
+        "Err(#{value.inspect})"
       end
     end
   end
