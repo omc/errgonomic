@@ -28,6 +28,27 @@ module Errgonomic
         value == other.value
       end
 
+      # Hash-based collections (Hash keys, Set, uniq, group_by) use eql? and
+      # hash, not ==. Follow the inner value's own eql? semantics, so Results
+      # behave as keys exactly like their inner values.
+      #
+      # @example
+      #   Ok(5).eql?(Ok(5)) # => true
+      #   Ok(1).eql?(Ok(1.0)) # => false
+      #   Ok(1).eql?(Err(1)) # => false
+      #   { Ok(5) => 1 }[Ok(5)] # => 1
+      #   [Err(:a), Err(:a)].uniq # => [Err(:a)]
+      def eql?(other)
+        self.class == other.class && value.eql?(other.value)
+      end
+
+      # @example
+      #   Ok(5).hash == Ok(5).hash # => true
+      #   Ok(5).hash == Err(5).hash # => false
+      def hash
+        [self.class, value].hash
+      end
+
       # Indicate that this is some kind of result object. Contrast to
       # Object#result? which is false for all other types.
       #
