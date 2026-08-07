@@ -5,6 +5,8 @@ module Errgonomic
     # The base class for all options. Some and None are subclasses.
     #
     class Any
+      include Comparable
+
       # def method_missing(_name, *_args)
       #   raise 'do it right noob'
       # end
@@ -48,6 +50,28 @@ module Errgonomic
         return [self, value] if some?
 
         [Errgonomic::Option::None]
+      end
+
+      # Options order like Rust's: None sorts before any Some, and Somes
+      # order by their inner values. Follows Ruby's <=> convention of
+      # returning nil for incomparable operands, whether the other object is
+      # not an Option or the inner values do not themselves compare.
+      #
+      # @example
+      #   (Some(5) <=> Some(6)) # => -1
+      #   (None() <=> Some(5)) # => -1
+      #   (Some(5) <=> None()) # => 1
+      #   (None() <=> None()) # => 0
+      #   (Some(1) <=> Some("x")) # => nil
+      #   (Some(1) <=> 1) # => nil
+      #   [Some(2), None(), Some(1)].sort # => [None(), Some(1), Some(2)]
+      #   [Some(2), Some(1)].min # => Some(1)
+      def <=>(other)
+        return nil unless other.is_a?(Errgonomic::Option::Any)
+        return none? ? 0 : 1 if other.none?
+        return -1 if none?
+
+        value <=> other.value
       end
 
       # return true if the contained value is Some and the block returns truthy
