@@ -109,6 +109,8 @@ end
 
 An unhandled Option refuses to leak into your output: `to_s` and `to_json` raise `Errgonomic::SerializeError`, so you handle the inner value deliberately rather than shipping `#<Errgonomic::Option::Some...>` to a user.
 
+Presence follows the discriminant, as in Rust: `Some` is `present?` and `None` is `blank?`, regardless of the wrapped value. So `Some(false).present?` and `Some(nil).present?` are both `true`. If you care about the inner value's own presence, unwrap it first.
+
 ### Result
 
 `Ok(value)` and `Err(error)` express an operation that may fail, again with the Rust combinators:
