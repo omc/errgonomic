@@ -12,6 +12,10 @@ require_relative 'errgonomic/type'
 require_relative 'errgonomic/option'
 require_relative 'errgonomic/result'
 
+# Option-returning lookups for the collections.
+require_relative 'errgonomic/core_ext/hash'
+require_relative 'errgonomic/core_ext/array'
+
 # Rails fu
 require_relative 'errgonomic/rails' if defined?(Rails::Railtie)
 
