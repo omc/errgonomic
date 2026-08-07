@@ -57,6 +57,21 @@ class Genre < ActiveRecord::Base
   delegate_optional :name, to: :parent, prefix: true, private: true
 end
 
+# A buggy layer that re-enters the attribute reader from beneath it: the
+# generated reader's super lands here, and the unqualified call restarts
+# dispatch at the top of the chain.
+module ReentrantBio
+  def bio
+    bio
+  end
+end
+
+class LoopyAuthor < ActiveRecord::Base
+  self.table_name = 'authors'
+  include ReentrantBio
+  include Errgonomic::Rails::ActiveRecordOptional
+end
+
 class BugTest < Minitest::Test
   def test_optional_attributes
     author = Author.create!(name: 'Cixin Liu')
@@ -88,10 +103,31 @@ class BugTest < Minitest::Test
     assert_equal author.name, book.author_name.unwrap!
   end
 
+  # Wrapped readers must work on a deep-but-legitimate stack; genuine runaway
+  # recursion is SystemStackError's job.
+  def test_optional_attributes_read_on_a_deep_stack
+    author = Author.create!(name: 'Cixin Liu', bio: 'writes sci-fi')
+    deeper(1100) { assert_equal 'writes sci-fi', author.bio.unwrap! }
+  end
+
+  def test_recursive_read_raises_a_named_error_at_first_reentry
+    author = LoopyAuthor.create!(name: 'Cixin Liu', bio: 'writes sci-fi')
+    error = assert_raises(Errgonomic::RecursiveOptionalReadError) { author.bio }
+    assert_match(/bio/, error.message)
+  end
+
   def test_private_delegate_optional
     fiction = Genre.create!(name: 'Fiction')
     scifi = Genre.create!(name: 'Sci-Fi', parent: fiction)
     assert_raises(NoMethodError) { scifi.parent_name }
     assert_equal 'Fiction', scifi.send(:parent_name).unwrap!
+  end
+
+  private
+
+  def deeper(frames, &block)
+    return block.call if frames.zero?
+
+    deeper(frames - 1, &block)
   end
 end
