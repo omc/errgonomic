@@ -27,7 +27,7 @@ module Errgonomic
         optional_associations = reflect_on_all_associations(:belongs_to)
                                 .select { |r| r.options[:optional] }
                                 .map(&:name)
-        excluded = Array(encrypted_attributes).map(&:to_s)
+        excluded = Array(encrypted_attributes).map(&:to_s) + Array(try(:errgonomic_optional_exceptions))
         optional_attributes = column_names
                               .select { |n| column_for_attribute(n).null }
                               .reject { |n| excluded.include?(n) }

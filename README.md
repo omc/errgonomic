@@ -199,7 +199,16 @@ end
 
 When `Rails::Railtie` is defined, Errgonomic installs a Railtie with two opt-in integrations for ActiveRecord:
 
-- `include Errgonomic::Rails::ActiveRecordOptional` in a model makes its nullable attributes and `optional: true` associations return `Some(value)` or `None()` instead of a value-or-nil. This is all-or-nothing per model: every nullable column and optional association is wrapped, with no per-attribute opt-in.
+- `include Errgonomic::Rails::ActiveRecordOptional` in a model makes its nullable attributes and `optional: true` associations return `Some(value)` or `None()` instead of a value-or-nil. Every nullable column and optional association is wrapped, with no per-attribute opt-in. Two kinds of attribute stay unwrapped: those declared with `encrypts`, whose surrounding machinery reads the raw value, and those named by `errgonomic_optional_except`, which must appear before the include.
+
+```ruby
+class Credential < ApplicationRecord
+  errgonomic_optional_except :legacy_token
+  include Errgonomic::Rails::ActiveRecordOptional
+
+  encrypts :access_secret   # also left unwrapped, declared either side of the include
+end
+```
 - `delegate_optional :name, to: :association` (available on all models) delegates through an optional association, returning an Option instead of raising on nil.
 
 `Object#to_option` is also available in Rails to lift any value into an Option (`nil.to_option # => None()`).

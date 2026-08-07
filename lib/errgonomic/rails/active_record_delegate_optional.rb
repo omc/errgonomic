@@ -9,6 +9,17 @@ module Errgonomic
       extend ActiveSupport::Concern
 
       class_methods do
+        # Names attributes that ActiveRecordOptional must leave alone. It has
+        # to be callable before the include, which is what computes the
+        # wrapped set, so it lives here rather than in the concern itself.
+        def errgonomic_optional_except(*names)
+          @errgonomic_optional_exceptions = errgonomic_optional_exceptions + names.map(&:to_s)
+        end
+
+        def errgonomic_optional_exceptions
+          @errgonomic_optional_exceptions ||= []
+        end
+
         def delegate_optional(*methods, to: nil, prefix: nil, private: nil)
           return if to.nil?
 

@@ -91,6 +91,14 @@ class Credential < ActiveRecord::Base
   encrypts :access_secret
 end
 
+# An opt-out named before the include keeps an attribute unwrapped, for
+# machinery the concern does not know about.
+class OptedOutCredential < ActiveRecord::Base
+  self.table_name = 'credentials'
+  errgonomic_optional_except :access_key
+  include Errgonomic::Rails::ActiveRecordOptional
+end
+
 class BugTest < Minitest::Test
   def test_optional_attributes
     author = Author.create!(name: 'Cixin Liu')
@@ -154,6 +162,13 @@ class BugTest < Minitest::Test
 
     assert_nil credential.access_secret
     assert credential.reload.access_secret.nil?
+  end
+
+  def test_errgonomic_optional_except_skips_named_attributes
+    credential = OptedOutCredential.create!(access_key: 'abc123', access_secret: 'shhh')
+
+    assert_equal 'abc123', credential.access_key
+    assert_equal 'shhh', credential.access_secret.unwrap!
   end
 
   private
