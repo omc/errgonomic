@@ -36,6 +36,34 @@ module Errgonomic
         value == other.value
       end
 
+      # Hash-based collections (Hash keys, Set, uniq, group_by) use eql? and
+      # hash, not ==. Follow the inner value's own eql? semantics, so Options
+      # behave as keys exactly like their inner values: Some(1) and Some(1.0)
+      # are distinct keys, just as 1 and 1.0 are.
+      #
+      # @example
+      #   Some(5).eql?(Some(5)) # => true
+      #   Some(1).eql?(Some(1.0)) # => false
+      #   None().eql?(None()) # => true
+      #   { Some(5) => 1 }[Some(5)] # => 1
+      #   [Some(1), Some(1), None(), None()].uniq # => [Some(1), None()]
+      def eql?(other)
+        return false if self.class != other.class
+        return true if none?
+
+        value.eql?(other.value)
+      end
+
+      # @example
+      #   Some(5).hash == Some(5).hash # => true
+      #   None().hash == None().hash # => true
+      #   Some(5).hash == None().hash # => false
+      def hash
+        return self.class.hash if none?
+
+        [self.class, value].hash
+      end
+
       # @example
       #   measurement = Errgonomic::Option::Some.new(1)
       #   case measurement
