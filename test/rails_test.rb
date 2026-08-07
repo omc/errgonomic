@@ -168,6 +168,18 @@ class BugTest < Minitest::Test
     refute_includes relation.to_sql, 'NULL'
   end
 
+  # Hash and Array serialization recurses with as_json, never to_json, so
+  # the refusal has to sit on as_json to survive nesting.
+  def test_nested_options_and_results_refuse_to_serialize
+    assert_raises(Errgonomic::SerializeError) { Some(5).as_json }
+    assert_raises(Errgonomic::SerializeError) { { a: Some(5) }.to_json }
+    assert_raises(Errgonomic::SerializeError) { { a: None() }.to_json }
+    assert_raises(Errgonomic::SerializeError) { [Some(5)].to_json }
+    assert_raises(Errgonomic::SerializeError) { Ok(5).as_json }
+    assert_raises(Errgonomic::SerializeError) { { a: Err(5) }.to_json }
+    assert_raises(Errgonomic::SerializeError) { [Ok(5)].to_json }
+  end
+
   def test_delegate_optional
     author = Author.create!(name: 'Cixin Liu')
     book = author.books.create!(title: 'Death\'s End')

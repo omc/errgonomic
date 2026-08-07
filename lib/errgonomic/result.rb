@@ -369,6 +369,15 @@ module Errgonomic
         raise Errgonomic::SerializeError, 'cannot serialize an unwrapped Result'
       end
 
+      # ActiveSupport's Hash#as_json and Array#as_json recurse through their
+      # members with as_json rather than to_json, so a Result nested in a
+      # payload reaches Object#as_json and serializes as its instance
+      # variables. Refuse there too, and the guard holds wherever a Result
+      # travels.
+      def as_json(*_args)
+        raise Errgonomic::SerializeError, 'cannot serialize an unwrapped Result'
+      end
+
       # pp uses its own object dump unless told otherwise; keep it consistent
       # with inspect.
       def pretty_print(pp)
