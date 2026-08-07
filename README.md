@@ -113,6 +113,8 @@ An unhandled Option refuses to leak into your output: `to_s` and `to_json` raise
 
 Presence follows the discriminant, as in Rust: `Some` is `present?` and `None` is `blank?`, regardless of the wrapped value. So `Some(false).present?` and `Some(nil).present?` are both `true`. If you care about the inner value's own presence, unwrap it first.
 
+The presence helpers are soft-deprecated on Options in favor of the combinators. The present side unwraps, where on any other object it returns the receiver — `Some(v).present_or_raise!(msg)`, `present_or(default)`, `present_or_else { }`, and `presence` all yield `v`, and `None` raises, substitutes, or answers `nil` — and each call prints a one-line stderr nudge naming the combinator to use instead (`expect!`, `unwrap_or`, `unwrap_or_else`, `unwrap_or(nil)`). The blank side (`blank_or*`) raises `UnwrappedAccessError` outright: an Option's blankness is its discriminant, so test it with `none?`.
+
 Equality is between Options only: `Some(5) == Some(5)`, but `Some(5) == 5` and `None() == nil` are `false`. That is quiet, never an error, matching how every Ruby object compares across types. Rust rejects `Some(5) == 5` at compile time; Ruby cannot, so guard the idiom in review and tests: compare against a wrapped value (`opt == Some(5)`) or test the inner value (`opt.some_and? { |v| v == 5 }`).
 
 ### Result
