@@ -175,6 +175,16 @@ h.dig(:person, :nickname)     # => None()      (absent)
 
 `dig` checks presence at every step, so an absent path and a present `nil` stay distinguishable, which core `dig` conflates. Digging into a non-collection raises `Errgonomic::TypeMismatchError` rather than answering `None()`, in the gem's pedantic style.
 
+### Booleans
+
+Booleans lift into the containers, following Rust's `bool`: `then_some`, and `ok_or`/`ok_or_else` from nightly. Rust splits the lazy form into `then`, but that name is core Ruby (`Kernel#then`), which Errgonomic will not redefine; `then_some` takes either a value or a block instead. Rust's `ok_or` returns `Result<(), E>`; Ruby has no unit type, so `Ok` carries `true`.
+
+```ruby
+admin.then_some(:badge)       # => Some(:badge) when true, None() when false
+admin.then_some { badge! }    # lazy variant
+valid.ok_or("invalid input")  # => Ok(true) / Err("invalid input")
+```
+
 ### Pedantic runtime checks
 
 Combinators that accept a block (`and_then`, `or_else`, ...) check at runtime that the block returned an Option or Result, raising `Errgonomic::ArgumentError` otherwise. That beats an ambiguous `undefined method` error somewhere downstream. If you would rather have the ambiguous downstream errors, you can opt out — but not quietly:

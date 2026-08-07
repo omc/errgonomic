@@ -16,6 +16,9 @@ require_relative 'errgonomic/result'
 require_relative 'errgonomic/core_ext/hash'
 require_relative 'errgonomic/core_ext/array'
 
+# Lift booleans into Option and Result.
+require_relative 'errgonomic/core_ext/bool'
+
 # Rails fu
 require_relative 'errgonomic/rails' if defined?(Rails::Railtie)
 
