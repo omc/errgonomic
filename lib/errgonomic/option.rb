@@ -363,6 +363,12 @@ module Errgonomic
         raise Errgonomic::SerializeError, 'cannot serialize an unwrapped Option'
       end
 
+      # pp uses its own object dump unless told otherwise; keep it consistent
+      # with inspect.
+      def pretty_print(pp)
+        pp.text(inspect)
+      end
+
       # filter
 
       # Return Some when either self or other are Some, otherwise return None
@@ -404,6 +410,18 @@ module Errgonomic
       def none?
         false
       end
+
+      # Render like Rust's Debug, delegating to the inner value's inspect so
+      # nesting stays unambiguous.
+      #
+      # @example
+      #   Some(5).inspect # => "Some(5)"
+      #   Some("x").inspect # => "Some(\"x\")"
+      #   Some(nil).inspect # => "Some(nil)"
+      #   Some(Some(1)).inspect # => "Some(Some(1))"
+      def inspect
+        "Some(#{value.inspect})"
+      end
     end
 
     # Represent the absence of a value.
@@ -414,6 +432,12 @@ module Errgonomic
 
       def none?
         true
+      end
+
+      # @example
+      #   None().inspect # => "None"
+      def inspect
+        'None'
       end
     end
   end
