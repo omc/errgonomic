@@ -305,7 +305,6 @@ module Errgonomic
       def deconstruct
         [self, value]
       end
-
     end
 
     # The Ok variant.
@@ -329,6 +328,7 @@ module Errgonomic
       end
     end
 
+    # The Err variant.
     class Err < Any
       class Arbitrary; end
 
@@ -362,11 +362,10 @@ module Errgonomic
   end
 end
 
-# Introduce certain helper methods into the Object class.
-#
-# @example
-#   "foo".result? # => false
-#   "foo".assert_result! # => raise Errgonomic::ResultRequiredError
+# Introduce result-ness helpers into the Object class. No doctests here:
+# several files reopen Object, and YARD keeps only one docstring for it, so
+# examples on the class itself can be silently dropped. Each method carries
+# its own examples instead.
 class Object
   # Convenience method to indicate whether we are working with a result.
   # TBD whether we implement some stubs for the rest of the Result API; I want

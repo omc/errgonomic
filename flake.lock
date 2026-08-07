@@ -1,23 +1,45 @@
 {
   "nodes": {
+    "gems4nix": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1784080771,
+        "narHash": "sha256-+Vnzrg4XMbTmFtr00krmdt5W8uKKKDVmV1B1cLDsGks=",
+        "owner": "omc",
+        "repo": "gems4nix",
+        "rev": "faecc855e315fc38ada09d7b60e53f1158370fd8",
+        "type": "github"
+      },
+      "original": {
+        "owner": "omc",
+        "ref": "nz/gemspec-directive-fix",
+        "repo": "gems4nix",
+        "type": "github"
+      }
+    },
     "nixpkgs": {
       "locked": {
-        "lastModified": 1751741127,
-        "narHash": "sha256-t75Shs76NgxjZSgvvZZ9qOmz5zuBE8buUaYD28BMTxg=",
+        "lastModified": 1784432872,
+        "narHash": "sha256-n3gKTBIV4ZA5VQpUakffBe3KGu4+mhPoA34rrqS0GkA=",
         "owner": "nixos",
         "repo": "nixpkgs",
-        "rev": "29e290002bfff26af1db6f64d070698019460302",
+        "rev": "fd1462031fdee08f65fd0b4c6b64e22239a77870",
         "type": "github"
       },
       "original": {
         "owner": "nixos",
-        "ref": "nixos-25.05",
+        "ref": "nixos-26.05",
         "repo": "nixpkgs",
         "type": "github"
       }
     },
     "root": {
       "inputs": {
+        "gems4nix": "gems4nix",
         "nixpkgs": "nixpkgs"
       }
     }

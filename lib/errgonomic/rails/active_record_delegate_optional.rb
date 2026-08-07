@@ -1,5 +1,10 @@
+# frozen_string_literal: true
+
 module Errgonomic
   module Rails
+    # Adds a `delegate_optional` class method in the spirit of Rails'
+    # `delegate`, returning an Option instead of nil or NoMethodError when
+    # the delegation target is absent.
     module ActiveRecordDelegateOptional
       extend ActiveSupport::Concern
 
@@ -14,6 +19,7 @@ module Errgonomic
                 #{to}.map { |obj| obj.send(:#{method_name}) }
               end
             RUBY
+            send(:private, prefixed_method_name) if private
           end
         end
       end

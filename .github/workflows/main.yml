@@ -13,8 +13,10 @@ jobs:
     name: Ruby ${{ matrix.ruby }}
     strategy:
       matrix:
+        # Track the latest Ruby; setup-ruby resolves "3.4" to its newest patch
+        # release. A support matrix down to a minimum Ruby can slot in here later.
         ruby:
-          - "3.3.6"
+          - "3.4"
 
     steps:
       - uses: actions/checkout@v4

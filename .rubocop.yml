@@ -1,1 +1,28 @@
-require: rubocop-yard
+plugins: rubocop-yard
+
+# Doctest expectation lines are executable spec; wrapping them would change
+# the assertions. Long lines carrying a `#=>` expectation are allowed.
+Layout/LineLength:
+  AllowedPatterns:
+    - '#=>'
+
+# Some(), None(), Ok() and Err() are the library's Rust-style value
+# constructors; their capitalized names are the point.
+Naming/MethodName:
+  AllowedPatterns:
+    - '\A(Some|None|Ok|Err)\z'
+
+# Option::Any and Result::Any deliberately carry the whole combinator API in
+# one class each, mirroring Rust's Option and Result surface.
+Metrics/ClassLength:
+  Exclude:
+    - lib/errgonomic/option.rb
+    - lib/errgonomic/result.rb
+
+# core_ext vendors ActiveSupport's blank?/present? patches; the reopened core
+# classes there are explained by the file header, not per class. Test
+# fixtures and cases are likewise self-describing.
+Style/Documentation:
+  Exclude:
+    - lib/errgonomic/core_ext/**/*
+    - test/**/*

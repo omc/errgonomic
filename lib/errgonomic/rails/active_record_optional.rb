@@ -44,17 +44,23 @@ end
 
 module Errgonomic
   module Option
+    # In Rails, presence doubles as some-ness: present? means Some and
+    # blank? means None, so Options cooperate with presence-based code.
     class Any
       alias some? present?
       alias none? blank?
     end
 
+    # Delegate ActiveRecord lifecycle checks to the wrapped record, so a Some
+    # can stand in for its record during persistence.
     class Some
       delegate :marked_for_destruction?, to: :value
       delegate :persisted?, to: :value
       delegate :touch_later, to: :value
     end
 
+    # A None answers nil? like nil itself, so ActiveRecord internals that
+    # check for nil treat an absent value as absent.
     class None
       def nil?
         true
@@ -63,6 +69,8 @@ module Errgonomic
   end
 end
 
+# Teach ActiveRecord type casting to unwrap Options: a Some casts as its
+# inner value, a None casts as nil.
 module ActiveRecordOptionShim
   def type_cast(value)
     case value
@@ -78,12 +86,14 @@ end
 
 ActiveRecord::ConnectionAdapters::Quoting.prepend(ActiveRecordOptionShim)
 
+# Lift nil into None.
 class NilClass
   def to_option
     None()
   end
 end
 
+# Lift any other value into Some.
 class Object
   def to_option
     Some(self)
@@ -92,6 +102,8 @@ end
 
 module Errgonomic
   module Rails
+    # Teach ActiveRecord SQL quoting to unwrap Options, quoting a None as
+    # SQL NULL.
     module ActiveRecordQuoting
       def quote(value)
         return super(value) unless value.is_a?(Errgonomic::Option::Any)

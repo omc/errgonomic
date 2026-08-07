@@ -29,6 +29,8 @@ module Errgonomic
 
   class TypeMismatchError < Error; end
 
+  # Raised when unwrap! is called on a None or an Err. Carries the Err's
+  # inner value so diagnostics can show what actually went wrong.
   class UnwrapError < Error
     attr_reader :value
 
