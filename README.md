@@ -144,6 +144,33 @@ end
 
 Like Options, unwrapped Results refuse `to_s` and `to_json`. And `Object#result?` / `Object#assert_result!` help enforce at runtime that a value is a Result.
 
+### Optional collections
+
+Hash and Array gain two additive lookups each, and nothing else changes about them. `fetch_option` follows presence the way Rust's `HashMap#get` and slice `get` do: a present key or index holding `nil` is `Some(nil)`, and only a missing one is `None()`.
+
+```ruby
+h = { color: :blue, shade: nil }
+h.fetch_option(:color)  # => Some(:blue)
+h.fetch_option(:shade)  # => Some(nil)
+h.fetch_option(:smell)  # => None()
+
+[:a, nil].fetch_option(1)  # => Some(nil)
+[:a, nil].fetch_option(2)  # => None()
+```
+
+`into_optional` wraps the collection in `Errgonomic::OptionalHash` / `Errgonomic::OptionalArray`, a view whose lookups all return Options. The wrappers are deliberately small — `[]`, `[]=`, `dig`, presence checks, and (for arrays) `first`/`last` — and are composed around the plain collection rather than subclassing it, because a subclass sheds its custom semantics every time `select` or `transform_values` returns a plain Hash. `to_h` / `to_a` hand back a detached copy.
+
+```ruby
+h = { person: { name: 'Ada', middle_name: nil } }.into_optional
+h.dig(:person, :name)         # => Some("Ada")
+h.dig(:person, :middle_name)  # => Some(nil)   (present, holding nil)
+h.dig(:person, :nickname)     # => None()      (absent)
+
+[].into_optional.first        # => None()
+```
+
+`dig` checks presence at every step, so an absent path and a present `nil` stay distinguishable, which core `dig` conflates. Digging into a non-collection raises `Errgonomic::TypeMismatchError` rather than answering `None()`, in the gem's pedantic style.
+
 ### Pedantic runtime checks
 
 Combinators that accept a block (`and_then`, `or_else`, ...) check at runtime that the block returned an Option or Result, raising `Errgonomic::ArgumentError` otherwise. That beats an ambiguous `undefined method` error somewhere downstream. If you would rather have the ambiguous downstream errors, you can opt out — but not quietly:
