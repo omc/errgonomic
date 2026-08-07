@@ -9,16 +9,18 @@ module Errgonomic
       #   raise 'do it right noob'
       # end
 
-      # An option of the same type with an equal inner value is equal.
+      # An Option equals another Option of the same class with an equal inner
+      # value. Anything else, including nil and the raw inner value, is not
+      # equal: quietly false, never an error. Rust rejects Some(5) == 5 at
+      # compile time; Ruby cannot, and raising here would break the many
+      # places Ruby compares heterogeneous operands (Array#include?,
+      # assertion diffs, dirty tracking). Compare Options (opt == Some(5)) or
+      # test the inner value (opt.some_and? { |v| v == 5 }) instead.
       #
-      # Because we're going to monkey patch this into other libraries Rails, we
-      # allow some "pass through" functionality into the inner value of a Some,
-      # such as comparability here.
-      #
-      # TODO: does None == null?
-      #
-      # strict:
-      #   Some(1) == 1 # => raise Errgonomic::NotComparableError, "Cannot compare Errgonomic::Option::Some with Integer"
+      # None() == nil is likewise false: None is a value that represents
+      # absence, not an absence Ruby can see. (The Rails integration
+      # separately makes None#nil? answer true, as an ActiveRecord
+      # compromise; equality does not follow it.)
       #
       # @example
       #   Some(1) == Some(1) # => true
