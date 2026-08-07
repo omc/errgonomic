@@ -66,6 +66,15 @@ class BugTest < Minitest::Test
     assert book.isbn.none?
   end
 
+  # Option presence must beat ActiveSupport's Object#present?, where any
+  # non-nil object (including None) counts as present.
+  def test_option_presence_with_active_support_loaded
+    author = Author.create!(name: 'Cixin Liu')
+    assert author.bio.blank?
+    refute author.bio.present?
+    assert author.name.present?
+  end
+
   def test_optional_associations
     author = Author.create!(name: 'Cixin Liu')
     book = author.books.create!(title: 'The Dark Forest')

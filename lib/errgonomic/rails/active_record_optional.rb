@@ -35,7 +35,8 @@ module Errgonomic
   end
 end
 
-# do we need this since we alias present below?
+# Validates that an Option attribute is Some, analogous to a presence
+# validation on a plain attribute.
 class SomeValidator < ActiveModel::EachValidator
   def validate_each(record, attribute, value)
     record.errors.add(attribute, 'is invalid') unless value.some?
@@ -44,13 +45,6 @@ end
 
 module Errgonomic
   module Option
-    # In Rails, presence doubles as some-ness: present? means Some and
-    # blank? means None, so Options cooperate with presence-based code.
-    class Any
-      alias some? present?
-      alias none? blank?
-    end
-
     # Delegate ActiveRecord lifecycle checks to the wrapped record, so a Some
     # can stand in for its record during persistence.
     class Some
