@@ -4,6 +4,21 @@ module Errgonomic
   module Rails
     # Concern to make ActiveRecord optional attributes and associations return an Option.
     #
+    # Four pragmatic compromises below satisfy ActiveRecord's assumptions
+    # about how accessors behave. They are deliberate exceptions to "Option
+    # behaves like Rust's Option", and the set is closed: a fifth would be a
+    # signal that ActiveRecord is pushing back somewhere unmapped, deserving
+    # a design discussion rather than a quiet patch.
+    #
+    # 1. None#nil? answers true, so AR internals and ordinary nil checks
+    #    treat an absent value as absent. Equality does not follow suit:
+    #    None() == nil stays false.
+    # 2. Some delegates persisted?, marked_for_destruction?, and touch_later
+    #    to its record, so a Some can stand in for it during persistence.
+    # 3. Two quoting prepends unwrap Options at the SQL boundary, so an
+    #    Option can be passed to where/quote.
+    # 4. SomeValidator provides a presence-style validation for Option
+    #    attributes.
     module ActiveRecordOptional
       extend ActiveSupport::Concern
 
