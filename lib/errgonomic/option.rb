@@ -194,16 +194,6 @@ module Errgonomic
         value
       end
 
-      # # returns the inner value if present, else returns the default value
-      # # @example
-      # #   Some(1).unwrap_or(2) # => 1
-      # #   None().unwrap_or(2) # => 2
-      # def unwrap_or_default
-      #   self.class.respond_to?(:default) or raise
-      #   return self.class.default if none?
-      #   value
-      # end
-
       # returns the inner value if present, else returns the result of the
       # provided block
       # @example
@@ -423,7 +413,38 @@ module Errgonomic
         pp.text(inspect)
       end
 
-      # filter
+      # Return self if the predicate is truthy for the inner value, else None.
+      # None passes through.
+      #
+      # @example
+      #   Some(1).filter(&:odd?) # => Some(1)
+      #   Some(2).filter(&:odd?) # => None()
+      #   None().filter(&:odd?) # => None()
+      def filter(&block)
+        return self if none?
+
+        block.call(value) ? self : None()
+      end
+
+      # Remove one level of Option nesting. Pedantically raises when the inner
+      # value is not itself an Option, which in Rust would not have compiled.
+      #
+      # @example
+      #   Some(Some(1)).flatten # => Some(1)
+      #   Some(None()).flatten # => None()
+      #   None().flatten # => None()
+      #   Some(Some(Some(1))).flatten # => Some(Some(1))
+      #   Some(1).flatten # => raise Errgonomic::TypeMismatchError, "cannot flatten Integer; it is not an Option"
+      def flatten
+        return self if none?
+
+        unless value.is_a?(Errgonomic::Option::Any)
+          raise Errgonomic::TypeMismatchError,
+                "cannot flatten #{value.class}; it is not an Option"
+        end
+
+        value
+      end
 
       # Return Some when either self or other are Some, otherwise return None
       # when both are None or both are Some.
@@ -440,12 +461,8 @@ module Errgonomic
         None()
       end
 
-      # insert
-      # get_or_insert
-      # get_or_insert_with
-      # take
-      # take_if
-      # replace
+      # Rust's mutating combinators (insert, get_or_insert, take, replace)
+      # are deliberately omitted: an Option here is a value, not a slot.
     end
 
     # Represent a value
