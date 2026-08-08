@@ -215,14 +215,15 @@ end
 
 #### ActiveRecord compromises
 
-ActiveRecord assumes things about accessors that a strict Rust Option cannot satisfy, so the integration carries four deliberate compromises. Everywhere else, treat a departure from Rust's `Option` semantics as a bug; these four are intended:
+ActiveRecord assumes things about accessors that a strict Rust Option cannot satisfy, so the integration carries five deliberate compromises. Everywhere else, treat a departure from Rust's `Option` semantics as a bug; these five are intended:
 
 1. `None#nil?` answers `true`, so ActiveRecord internals and ordinary `.nil?` checks treat an absent value as absent. Equality does not follow suit: `None() == nil` is still `false`.
 2. `Some` delegates `persisted?`, `marked_for_destruction?`, and `touch_later` to its record, so a `Some` can stand in for its record during persistence.
 3. Quoting is patched so an `Option` passed into `where`/`quote` is unwrapped at the SQL boundary.
 4. `SomeValidator` provides a presence-style validation for Option attributes.
+5. Attributes declared with `encrypts` are never wrapped: ActiveRecord Encryption's own machinery (a length validator it registers outside `Model.validators`) reads the raw value and cannot survive an Option.
 
-The set is closed. If a future integration appears to need a fifth compromise, that is a signal ActiveRecord is pushing back somewhere unmapped, and it warrants a design discussion rather than a quiet patch.
+The set is closed. If a future integration appears to need a sixth compromise, that is a signal ActiveRecord is pushing back somewhere unmapped, and it warrants a design discussion rather than a quiet patch. `errgonomic_optional_except` is deliberately not on the list: it is configuration, an escape hatch that softens the all-or-nothing include for whatever conflict shows up next, rather than a semantic exception.
 
 ## Development
 

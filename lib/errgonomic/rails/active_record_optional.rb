@@ -4,9 +4,9 @@ module Errgonomic
   module Rails
     # Concern to make ActiveRecord optional attributes and associations return an Option.
     #
-    # Four pragmatic compromises below satisfy ActiveRecord's assumptions
+    # Five pragmatic compromises below satisfy ActiveRecord's assumptions
     # about how accessors behave. They are deliberate exceptions to "Option
-    # behaves like Rust's Option", and the set is closed: a fifth would be a
+    # behaves like Rust's Option", and the set is closed: a sixth would be a
     # signal that ActiveRecord is pushing back somewhere unmapped, deserving
     # a design discussion rather than a quiet patch.
     #
@@ -19,6 +19,13 @@ module Errgonomic
     #    Option can be passed to where/quote.
     # 4. SomeValidator provides a presence-style validation for Option
     #    attributes.
+    # 5. Attributes declared with encrypts are never wrapped: ActiveRecord
+    #    Encryption registers a length validator outside Model.validators
+    #    that reads the raw value and cannot survive an Option.
+    #
+    # errgonomic_optional_except is not on the list: it is configuration, an
+    # escape hatch for whatever conflict shows up next, not a semantic
+    # exception.
     module ActiveRecordOptional
       extend ActiveSupport::Concern
 
