@@ -4,9 +4,9 @@ module Errgonomic
   module Rails
     # Concern to make ActiveRecord optional attributes and associations return an Option.
     #
-    # Four pragmatic compromises below satisfy ActiveRecord's assumptions
+    # Five pragmatic compromises below satisfy ActiveRecord's assumptions
     # about how accessors behave. They are deliberate exceptions to "Option
-    # behaves like Rust's Option", and the set is closed: a fifth would be a
+    # behaves like Rust's Option", and the set is closed: a sixth would be a
     # signal that ActiveRecord is pushing back somewhere unmapped, deserving
     # a design discussion rather than a quiet patch.
     #
@@ -19,6 +19,13 @@ module Errgonomic
     #    Option can be passed to where/quote.
     # 4. SomeValidator provides a presence-style validation for Option
     #    attributes.
+    # 5. Attributes declared with encrypts are never wrapped: ActiveRecord
+    #    Encryption registers a length validator outside Model.validators
+    #    that reads the raw value and cannot survive an Option.
+    #
+    # errgonomic_optional_except is not on the list: it is configuration, an
+    # escape hatch for whatever conflict shows up next, not a semantic
+    # exception.
     module ActiveRecordOptional
       extend ActiveSupport::Concern
 
@@ -27,8 +34,10 @@ module Errgonomic
         optional_associations = reflect_on_all_associations(:belongs_to)
                                 .select { |r| r.options[:optional] }
                                 .map(&:name)
+        excluded = Array(encrypted_attributes).map(&:to_s) + Array(try(:errgonomic_optional_exceptions))
         optional_attributes = column_names
                               .select { |n| column_for_attribute(n).null }
+                              .reject { |n| excluded.include?(n) }
         @errgonomic_optionals = (optional_attributes + optional_associations)
         @errgonomic_optionals.each do |name|
           class_eval <<-RUBY, __FILE__, __LINE__ + 1
@@ -55,6 +64,23 @@ module Errgonomic
       class_methods do
         def errgonomic_optionals
           @errgonomic_optionals
+        end
+
+        # Encryption surrounds an attribute with machinery that reads the raw
+        # value, including a length validator that calls to_s on it, so a
+        # wrapped encrypted attribute cannot be saved. Declaring encrypts
+        # after the include is the ordinary spelling, so catch it here too and
+        # give the attribute its plain reader back.
+        def encrypts(*names, **options)
+          super.tap { errgonomic_unwrap_optionals(*names) }
+        end
+
+        def errgonomic_unwrap_optionals(*names)
+          names.map(&:to_s).each do |name|
+            next unless @errgonomic_optionals&.delete(name)
+
+            remove_method(name)
+          end
         end
       end
     end
