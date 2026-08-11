@@ -117,6 +117,20 @@ class BugTest < Minitest::Test
     assert author.name.present?
   end
 
+  # The presence helpers are how application code reaches a wrapped
+  # attribute's value, so they must yield the value and not the wrapper.
+  def test_wrapped_attribute_round_trips_through_present_or_raise
+    author = Author.create!(name: 'Cixin Liu', bio: 'writes sci-fi')
+    assert_equal 'writes sci-fi', author.bio.present_or_raise('no bio')
+    assert_equal 'writes sci-fi', author.bio.present_or('none given')
+    assert_equal 'writes sci-fi', author.bio.presence
+
+    unwritten = Author.create!(name: 'Liu Cixin')
+    assert_raises(Errgonomic::NotPresentError) { unwritten.bio.present_or_raise('no bio') }
+    assert_equal 'none given', unwritten.bio.present_or('none given')
+    assert_nil unwritten.bio.presence
+  end
+
   def test_optional_associations
     author = Author.create!(name: 'Cixin Liu')
     book = author.books.create!(title: 'The Dark Forest')

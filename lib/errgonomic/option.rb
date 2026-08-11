@@ -194,6 +194,114 @@ module Errgonomic
         none?
       end
 
+      # The presence helpers on Object keep their receiver; on an Option that
+      # would hand back the wrapper where the caller asked for a value. Here
+      # the present side unwraps instead, so a name that reads like an
+      # accessor behaves like one. The whole family is soft-deprecated on
+      # Options in favor of the combinators, so each call nudges via stderr,
+      # and the blank side, which has no working call sites to preserve,
+      # teaches rather than guesses at semantics.
+
+      # Returns the inner value of a Some, and raises on a None. Presence
+      # follows the discriminant, so Some(nil) yields nil.
+      #
+      # @param message [String] The error message to raise on a None.
+      # @return [Object] The inner value of a Some.
+      #
+      # @example
+      #   Some("secret").present_or_raise!("no secret") # => "secret"
+      #   Some(nil).present_or_raise!("no secret") # => nil
+      #   None().present_or_raise!("no secret") # => raise Errgonomic::NotPresentError, "no secret"
+      def present_or_raise!(message)
+        presence_nudge('present_or_raise', 'expect!')
+        raise Errgonomic::NotPresentError, message if none?
+
+        value
+      end
+
+      alias present_or_raise present_or_raise!
+
+      # Returns the inner value of a Some, and the given default on a None.
+      # No pedantic type check on the default: this family is deprecated on
+      # Options, and unwrap_or, which the nudge points to, has none either.
+      #
+      # @param default [Object] The value to return on a None.
+      # @return [Object] The inner value of a Some, otherwise the default.
+      #
+      # @example
+      #   Some("secret").present_or("fallback") # => "secret"
+      #   None().present_or("fallback") # => "fallback"
+      def present_or(default)
+        presence_nudge('present_or', 'unwrap_or')
+        return default if none?
+
+        value
+      end
+
+      # Returns the inner value of a Some, and the result of the block on a
+      # None.
+      #
+      # @param block [Proc] The block to call on a None.
+      # @return [Object] The inner value of a Some, otherwise the block's value.
+      #
+      # @example
+      #   Some("secret").present_or_else { "fallback" } # => "secret"
+      #   None().present_or_else { "fallback" } # => "fallback"
+      def present_or_else(&block)
+        presence_nudge('present_or_else', 'unwrap_or_else')
+        return block.call if none?
+
+        value
+      end
+
+      # Returns the inner value of a Some, and nil on a None, so the Rails
+      # +presence || default+ idiom reaches the value rather than the wrapper.
+      #
+      # @return [Object, nil] The inner value of a Some, otherwise nil.
+      #
+      # @example
+      #   Some("secret").presence # => "secret"
+      #   None().presence # => nil
+      #   None().presence || "fallback" # => "fallback"
+      def presence
+        presence_nudge('presence', 'unwrap_or(nil)')
+        return nil if none?
+
+        value
+      end
+
+      # @example the blank side of the presence family teaches the combinators
+      #   begin
+      #     None().blank_or("x")
+      #   rescue NoMethodError => e
+      #     e.class
+      #   end # => Errgonomic::UnwrappedAccessError
+      def blank_or(_default)
+        raise_blank_side_teaching(:blank_or)
+      end
+
+      # @example
+      #   begin
+      #     Some(1).blank_or_else { :x }
+      #   rescue NoMethodError => e
+      #     e.class
+      #   end # => Errgonomic::UnwrappedAccessError
+      def blank_or_else(&_block)
+        raise_blank_side_teaching(:blank_or_else)
+      end
+
+      # @example
+      #   begin
+      #     None().blank_or_raise!("msg")
+      #   rescue NoMethodError => e
+      #     e.class
+      #   end # => Errgonomic::UnwrappedAccessError
+      def blank_or_raise!(_message)
+        raise_blank_side_teaching(:blank_or_raise!)
+      end
+
+      alias blank_or_raise blank_or_raise!
+
       # return an Array with the contained value, if any
       # @example
       #   Some(1).to_a # => [1]
@@ -501,6 +609,21 @@ module Errgonomic
 
         None()
       end
+
+      private
+
+      def presence_nudge(from, to)
+        warn "Errgonomic: `#{from}` on an Option is soft-deprecated; prefer `#{to}`."
+      end
+
+      def raise_blank_side_teaching(name)
+        raise Errgonomic::UnwrappedAccessError.new(<<~MSG, name)
+          `#{name}` is not supported on an Option, whose blankness is its discriminant.
+          Test it with none?, or supply a fallback with unwrap_or / unwrap_or_else.
+        MSG
+      end
+
+      public
 
       # Rust's mutating combinators (insert, get_or_insert, take, replace)
       # are deliberately omitted: an Option here is a value, not a slot.
