@@ -219,7 +219,7 @@ ActiveRecord assumes things about accessors that a strict Rust Option cannot sat
 
 1. `None#nil?` answers `true`, so ActiveRecord internals and ordinary `.nil?` checks treat an absent value as absent. Equality does not follow suit: `None() == nil` is still `false`.
 2. `Some` delegates `persisted?`, `marked_for_destruction?`, and `touch_later` to its record, so a `Some` can stand in for its record during persistence.
-3. Quoting is patched so an `Option` passed into `where`/`quote` is unwrapped at the SQL boundary.
+3. Quoting and the predicate builder are patched so an `Option` passed into `where`/`quote` is unwrapped at the SQL boundary: `Some(v)` binds exactly as `v`, and `None()` as `nil`, so a hash condition asks for `IS NULL`. An array of Options unwraps too. An Option interpolated into raw SQL (`where("id = ?", opt)`) still raises, as it should.
 4. `SomeValidator` provides a presence-style validation for Option attributes.
 5. Attributes declared with `encrypts` are never wrapped: ActiveRecord Encryption's own machinery (a length validator it registers outside `Model.validators`) reads the raw value and cannot survive an Option.
 

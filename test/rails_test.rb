@@ -123,6 +123,37 @@ class BugTest < Minitest::Test
     assert book.author.some?
   end
 
+  # Feeding a wrapped attribute back into a query is among the most common
+  # Rails idioms, so a Some has to bind exactly as its inner value would.
+  def test_where_with_a_some_matches_the_row
+    genre = Genre.create!(name: 'Sci-Fi')
+    book = Book.create!(title: 'The Dark Forest', genre_id: genre.id)
+
+    assert_equal 1, Book.where(genre_id: book.genre_id).count
+    refute_includes Book.where(genre_id: book.genre_id).to_sql, '= NULL'
+  end
+
+  # A None reads as absent, which for a hash condition means IS NULL rather
+  # than an = NULL that can never match.
+  def test_where_with_a_none_asks_for_null
+    unshelved = Book.create!(title: 'Ball Lightning')
+
+    relation = Book.where(title: 'Ball Lightning', genre_id: unshelved.genre_id)
+    assert_includes relation.to_sql, 'IS NULL'
+    assert_equal 1, relation.count
+  end
+
+  def test_where_with_an_array_of_options
+    first = Genre.create!(name: 'Sci-Fi')
+    second = Genre.create!(name: 'Fantasy')
+    Book.create!(title: 'The Dark Forest', genre_id: first.id)
+    Book.create!(title: 'The Hobbit', genre_id: second.id)
+
+    relation = Book.where(genre_id: [Some(first.id), Some(second.id)])
+    assert_equal 2, relation.count
+    refute_includes relation.to_sql, 'NULL'
+  end
+
   def test_delegate_optional
     author = Author.create!(name: 'Cixin Liu')
     book = author.books.create!(title: 'Death\'s End')
