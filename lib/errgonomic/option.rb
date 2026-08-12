@@ -556,6 +556,15 @@ module Errgonomic
         raise Errgonomic::SerializeError, 'cannot serialize an unwrapped Option'
       end
 
+      # ActiveSupport's Hash#as_json and Array#as_json recurse through their
+      # members with as_json rather than to_json, so an Option nested in a
+      # payload reaches Object#as_json and serializes as its instance
+      # variables. Refuse there too, and the guard holds wherever an Option
+      # travels.
+      def as_json(*_args)
+        raise Errgonomic::SerializeError, 'cannot serialize an unwrapped Option'
+      end
+
       # pp uses its own object dump unless told otherwise; keep it consistent
       # with inspect.
       def pretty_print(pp)

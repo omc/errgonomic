@@ -107,7 +107,7 @@ in Errgonomic::Option::None
 end
 ```
 
-An unhandled Option refuses to leak into your output: `to_s` and `to_json` raise `Errgonomic::SerializeError`, so you handle the inner value deliberately rather than shipping `#<Errgonomic::Option::Some...>` to a user.
+An unhandled Option refuses to leak into your output: `to_s`, `to_json`, and `as_json` raise `Errgonomic::SerializeError`, so you handle the inner value deliberately rather than shipping `#<Errgonomic::Option::Some...>` to a user. The refusal covers `as_json` because Hash and Array serialization recurses through that method, and an Option nested in a payload would otherwise serialize as `{"value": ...}`.
 
 `unwrap!` and `expect!` are for tests and consoles, not application code: they raise on `None`, which is exactly the ambiguous failure the type exists to prevent. Application code should always have a combinator or pattern match that handles the `None` branch explicitly; if none fits, that is a gap worth an issue rather than a reason to unwrap.
 
@@ -148,7 +148,7 @@ in Errgonomic::Result::Err, Exception => e
 end
 ```
 
-Like Options, unwrapped Results refuse `to_s` and `to_json`. And `Object#result?` / `Object#assert_result!` help enforce at runtime that a value is a Result.
+Like Options, unwrapped Results refuse `to_s`, `to_json`, and `as_json`. And `Object#result?` / `Object#assert_result!` help enforce at runtime that a value is a Result.
 
 ### Optional collections
 
