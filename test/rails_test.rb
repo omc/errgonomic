@@ -127,6 +127,23 @@ class Credential < ActiveRecord::Base
   encrypts :access_secret
 end
 
+# Nested attributes are assigned through the public reader, and ActiveRecord
+# asks whatever it finds there whether it is a new record, so a wrapped
+# singular association cannot survive the round trip.
+class Editor < ActiveRecord::Base
+  self.table_name = 'authors'
+  include Errgonomic::Rails::ActiveRecordOptional
+  has_one :profile, foreign_key: :author_id
+  accepts_nested_attributes_for :profile, allow_destroy: true
+end
+
+class Anthology < ActiveRecord::Base
+  self.table_name = 'books'
+  include Errgonomic::Rails::ActiveRecordOptional
+  belongs_to :author, optional: true
+  accepts_nested_attributes_for :author
+end
+
 # An opt-out named before the include keeps an attribute unwrapped, for
 # machinery the concern does not know about.
 class OptedOutCredential < ActiveRecord::Base
@@ -377,6 +394,39 @@ class BugTest < Minitest::Test
     author.destroy!
 
     assert_equal 0, Profile.where(author_id: author.id).count
+  end
+
+  # ActiveRecord reads the association, asks it whether it is a new record,
+  # and assigns through it, so the reader has to stay plain for the whole
+  # nested-attributes cycle: build, update, and destroy.
+  def test_nested_attributes_on_a_has_one_keep_working
+    editor = Editor.create!(name: 'Cixin Liu')
+
+    editor.update!(profile_attributes: { tagline: 'writes sci-fi' })
+
+    assert_equal 'writes sci-fi', editor.reload.profile.tagline
+
+    editor.update!(profile_attributes: { id: editor.profile.id, tagline: 'revised' })
+
+    assert_equal 'revised', editor.reload.profile.tagline
+
+    editor.update!(profile_attributes: { id: editor.profile.id, _destroy: '1' })
+
+    assert_nil editor.reload.profile
+  end
+
+  def test_nested_attributes_on_an_optional_belongs_to_keep_working
+    anthology = Anthology.create!(title: 'Wandering Earth', author_attributes: { name: 'Cixin Liu' })
+
+    assert_equal 'Cixin Liu', anthology.reload.author.name
+  end
+
+  # The unwrapped set is discoverable, so a converted model can say which
+  # readers ActiveRecord kept for itself.
+  def test_an_association_with_nested_attributes_is_reported_as_unwrapped
+    refute_includes Editor.errgonomic_optionals, 'profile'
+    refute_includes Anthology.errgonomic_optionals, 'author'
+    assert_includes Anthology.errgonomic_optional_exclusions, 'author'
   end
 
   # required: true says the record is always there, which is a validation,
