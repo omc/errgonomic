@@ -4,7 +4,7 @@ plugins: rubocop-yard
 # the assertions. Long lines carrying a `#=>` expectation are allowed.
 Layout/LineLength:
   AllowedPatterns:
-    - '#=>'
+    - "#=>"
 
 # Some(), None(), Ok() and Err() are the library's Rust-style value
 # constructors; their capitalized names are the point.
@@ -19,6 +19,7 @@ Metrics/ClassLength:
     - lib/errgonomic/option.rb
     - lib/errgonomic/result.rb
     - test/**/*
+    - benchmark/**/*
 
 # core_ext vendors ActiveSupport's blank?/present? patches; the reopened core
 # classes there are explained by the file header, not per class. Test
@@ -29,21 +30,36 @@ Style/Documentation:
     - test/**/*
 
 # A test states one behavior end to end, and splitting one to satisfy a size
-# metric hides the behavior it was written to name. A cop that names its own
-# Exclude replaces this one, so Metrics/ClassLength repeats the path above.
+# metric hides the behavior it was written to name. Size cops do not apply
+# under test/ or benchmark/. A cop that names its own Exclude replaces this
+# one, so those repeat the two paths.
 Metrics:
   Exclude:
     - test/**/*
+    - benchmark/**/*
 
 # The ActiveRecord hooks in the optional concern are one subject — where a
-# reader may come from and what leaves it alone — and reading them together is
-# the point. The generated reader is a heredoc, which the length cops count as
-# if it were code.
+# reader may come from and what leaves it alone — and reading them together
+# is the point. The generated reader is a heredoc, which the length cops
+# count as if it were code.
 Metrics/BlockLength:
   Exclude:
     - lib/errgonomic/rails/active_record_optional.rb
     - test/**/*
+    - benchmark/**/*
 Metrics/MethodLength:
   Exclude:
     - lib/errgonomic/rails/active_record_optional.rb
     - test/**/*
+    - benchmark/**/*
+
+# has_one overrides ActiveRecord's association macro; it is not a predicate.
+Naming/PredicatePrefix:
+  AllowedMethods:
+    - has_one
+
+# A benchmark prints a table, where the format tokens are positional by
+# nature and naming each one only adds noise.
+Style/FormatStringToken:
+  Exclude:
+    - benchmark/**/*

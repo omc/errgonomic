@@ -18,6 +18,13 @@ end
 
 task default: %i[test yard:doctest]
 
+namespace :benchmark do
+  desc 'Cost of a wrapped attribute read, against the plain reader it replaces'
+  task :optional_reader do
+    ruby '-Ilib benchmark/optional_reader.rb'
+  end
+end
+
 namespace :gems4nix do
   desc 'Regenerate gem-groups.json after Gemfile/Gemfile.lock changes'
   task :groups do
