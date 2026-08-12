@@ -32,6 +32,18 @@ ActiveRecord::Schema.define do
     t.timestamps
   end
 
+  create_table 'profiles', force: :cascade do |t|
+    t.string :tagline
+    t.references :author
+    t.timestamps
+  end
+
+  create_table 'awards', force: :cascade do |t|
+    t.string :name, null: false
+    t.references :author
+    t.timestamps
+  end
+
   create_table 'magazines', force: :cascade do |t|
     t.string :title, null: false
     t.string :issn
@@ -56,7 +68,25 @@ Errgonomic::Rails.setup_before
 
 class Author < ActiveRecord::Base
   has_many :books
+  has_one :profile, dependent: :destroy
   include Errgonomic::Rails::ActiveRecordOptional
+  has_one :award, dependent: :destroy
+end
+
+class Profile < ActiveRecord::Base
+  belongs_to :author
+end
+
+class Award < ActiveRecord::Base
+  belongs_to :author
+end
+
+# A has_one declared required asserts the record is there, so its reader is
+# left alone: absence is a validation failure rather than a value.
+class Publisher < ActiveRecord::Base
+  self.table_name = 'authors'
+  include Errgonomic::Rails::ActiveRecordOptional
+  has_one :profile, required: true, foreign_key: :author_id
 end
 
 class Book < ActiveRecord::Base
@@ -317,6 +347,45 @@ class BugTest < Minitest::Test
     end
 
     assert_equal %w[issn], quarterly.errgonomic_optionals
+  end
+
+  # A has_one is absent whenever no row points back, so its reader carries
+  # the same absence a nullable column does, whichever side of the include
+  # it is declared on.
+  def test_has_one_reads_as_an_option
+    author = Author.create!(name: 'Cixin Liu')
+
+    assert author.profile.none?
+    assert author.award.none?
+
+    author.create_profile!(tagline: 'writes sci-fi')
+    author.create_award!(name: 'Hugo')
+
+    assert_equal 'writes sci-fi', author.reload.profile.unwrap!.tagline
+    assert_equal 'Hugo', author.award.unwrap!.name
+  end
+
+  # Absence is representable, so the association's own machinery has to keep
+  # working through the wrapper.
+  def test_has_one_writes_and_dependent_destroy_still_work
+    author = Author.create!(name: 'Cixin Liu')
+    author.profile = Profile.new(tagline: 'writes sci-fi')
+    author.save!
+
+    assert_equal 'writes sci-fi', author.reload.profile.unwrap!.tagline
+
+    author.destroy!
+
+    assert_equal 0, Profile.where(author_id: author.id).count
+  end
+
+  # required: true says the record is always there, which is a validation,
+  # not an absence to represent.
+  def test_a_required_has_one_is_left_unwrapped
+    publisher = Publisher.create!(name: 'Tor', profile: Profile.new(tagline: 'imprint'))
+
+    assert_equal 'imprint', publisher.reload.profile.tagline
+    assert_raises(ActiveRecord::RecordInvalid) { Publisher.create!(name: 'Baen') }
   end
 
   # An inherited reader is already wrapped, and a second wrap nests: Some of

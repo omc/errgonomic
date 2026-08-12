@@ -33,6 +33,9 @@ module Errgonomic
         reflect_on_all_associations(:belongs_to)
           .select { |r| r.options[:optional] }
           .each { |r| errgonomic_wrap_optional(r.name) }
+        reflect_on_all_associations(:has_one)
+          .reject { |r| r.options[:required] }
+          .each { |r| errgonomic_wrap_optional(r.name) }
       end
 
       class_methods do
@@ -114,6 +117,14 @@ module Errgonomic
         # Wrap it when it arrives, or the conversion is silently partial.
         def belongs_to(name, scope = nil, **options)
           super.tap { errgonomic_wrap_optional(name) if options[:optional] }
+        end
+
+        # A has_one is absent whenever no row points back at the record, so
+        # its reader carries the same absence a nullable column does.
+        # required: true is the exception: it asserts the record is there, and
+        # absence is a validation failure rather than a value to handle.
+        def has_one(name, scope = nil, **options)
+          super.tap { errgonomic_wrap_optional(name) unless options[:required] }
         end
 
         # Encryption surrounds an attribute with machinery that reads the raw
