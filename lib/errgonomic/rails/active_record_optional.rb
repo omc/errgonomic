@@ -182,8 +182,12 @@ module Errgonomic
           class_eval <<-RUBY, __FILE__, __LINE__ + 1
             def #{name}
               if @__errgonomic_reading_#{name}
-                raise Errgonomic::RecursiveOptionalReadError,
-                      "\#{self.class}##{name} re-entered itself; something beneath this reader reads it again"
+                raise Errgonomic::RecursiveOptionalReadError, <<~MSG
+                  \#{self.class}##{name} re-entered itself; something beneath this reader reads it again.
+                  If this read was not recursive, the record may have been read from two threads at once,
+                  which this guard cannot tell apart. Please report that at
+                  https://github.com/omc/errgonomic/issues
+                MSG
               end
 
               @__errgonomic_reading_#{name} = true
