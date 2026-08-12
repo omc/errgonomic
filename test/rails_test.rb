@@ -32,6 +32,12 @@ ActiveRecord::Schema.define do
     t.timestamps
   end
 
+  create_table 'magazines', force: :cascade do |t|
+    t.string :title, null: false
+    t.string :issn
+    t.timestamps
+  end
+
   create_table 'credentials', force: :cascade do |t|
     t.string :access_key, limit: 255
     t.string :access_secret, limit: 255
@@ -115,6 +121,10 @@ class OptedOutBook < ActiveRecord::Base
   belongs_to :author, optional: true
   include Errgonomic::Rails::ActiveRecordOptional
 end
+
+# A subclass has its own schema state, so it reaches the wrapping seam a
+# second time for columns its parent already wrapped.
+class Novel < Book; end
 
 class BugTest < Minitest::Test
   def test_optional_attributes
@@ -236,6 +246,40 @@ class BugTest < Minitest::Test
 
     assert_nil credential.access_secret
     assert credential.reload.access_secret.nil?
+  end
+
+  # ActiveRecord loads a model's schema on first use, not at definition, so a
+  # class body must not need a database. Wrapping at include time did, and
+  # any boot that loads models without a reachable database — an asset build,
+  # an image build, a schema check — then fails on the include.
+  def test_including_the_concern_does_not_reach_for_the_schema
+    statements = []
+    subscription = ActiveSupport::Notifications.subscribe('sql.active_record') do |*, payload|
+      statements << payload[:sql]
+    end
+
+    magazine = Class.new(ActiveRecord::Base) do
+      def self.name = 'Magazine'
+      self.table_name = 'magazines'
+      include Errgonomic::Rails::ActiveRecordOptional
+    end
+
+    ActiveSupport::Notifications.unsubscribe(subscription)
+
+    assert_empty statements
+    assert magazine.create!(title: 'Nature').issn.none?
+  end
+
+  # An inherited reader is already wrapped, and a second wrap nests: Some of
+  # a Some for a present value, while an absent one collapses back to None
+  # because None answers nil?. Half of it is silent.
+  def test_a_subclass_reads_its_inherited_wrapped_attributes_once
+    author = Author.create!(name: 'Cixin Liu')
+    novel = Novel.create!(title: 'Death\'s End', author_id: author.id, isbn: '9780765377104')
+
+    assert_equal '9780765377104', novel.isbn.unwrap!
+    assert_equal author.id, novel.author.unwrap!.id
+    assert Novel.create!(title: 'Supernova Era').isbn.none?
   end
 
   # Wrapping only what the class already declared makes the include's

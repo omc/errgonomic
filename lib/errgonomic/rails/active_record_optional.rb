@@ -33,11 +33,9 @@ module Errgonomic
         # ::Rails.logger.debug('ActiveRecordOptional')
         @errgonomic_optional_exclusions =
           Array(encrypted_attributes).map(&:to_s) + Array(try(:errgonomic_optional_exceptions)).map(&:to_s)
-        optional_associations = reflect_on_all_associations(:belongs_to)
-                                .select { |r| r.options[:optional] }
-                                .map(&:name)
-        optional_attributes = column_names.select { |n| column_for_attribute(n).null }
-        (optional_attributes + optional_associations).each { |name| errgonomic_wrap_optional(name) }
+        reflect_on_all_associations(:belongs_to)
+          .select { |r| r.options[:optional] }
+          .each { |r| errgonomic_wrap_optional(r.name) }
       end
 
       class_methods do
@@ -46,7 +44,38 @@ module Errgonomic
         end
 
         def errgonomic_optional_exclusions
-          @errgonomic_optional_exclusions ||= []
+          @errgonomic_optional_exclusions ||=
+            if superclass.respond_to?(:errgonomic_optional_exclusions)
+              superclass.errgonomic_optional_exclusions.dup
+            else
+              []
+            end
+        end
+
+        # A reader wrapped by an ancestor is already an Option; a subclass
+        # that wrapped it again would nest it.
+        def errgonomic_optional?(name)
+          return true if errgonomic_optionals.include?(name)
+
+          superclass.respond_to?(:errgonomic_optional?) && superclass.errgonomic_optional?(name)
+        end
+
+        # ActiveRecord defines its attribute methods the first time a model
+        # needs its schema, not when the class body runs. Wrapping nullable
+        # columns from the same seam keeps a database out of class loading.
+        def load_schema!
+          super
+          errgonomic_wrap_nullable_columns
+        end
+
+        # A subclass loads its own schema, so whichever of the two is touched
+        # first wraps the shared columns first, and a subclass that got there
+        # first would wrap its parent's readers a second time. Walk the chain
+        # from the top down instead, so an ancestor's readers always exist
+        # before a subclass considers the same name.
+        def errgonomic_wrap_nullable_columns
+          superclass.errgonomic_wrap_nullable_columns if superclass.respond_to?(:errgonomic_wrap_nullable_columns)
+          column_names.each { |name| errgonomic_wrap_optional(name) if column_for_attribute(name).null }
         end
 
         # A concern belongs at the top of a model, above its associations, so
@@ -59,10 +88,14 @@ module Errgonomic
         # Encryption surrounds an attribute with machinery that reads the raw
         # value, including a length validator that calls to_s on it, so a
         # wrapped encrypted attribute cannot be saved. Declaring encrypts
-        # after the include is the ordinary spelling, so catch it here too and
-        # give the attribute its plain reader back.
+        # after the include is the ordinary spelling, so record the exclusion
+        # for whenever the schema arrives, and take back any reader already
+        # wrapped.
         def encrypts(*names, **options)
-          super.tap { errgonomic_unwrap_optionals(*names) }
+          super.tap do
+            errgonomic_optional_exclusions.concat(names.map(&:to_s))
+            errgonomic_unwrap_optionals(*names)
+          end
         end
 
         def errgonomic_unwrap_optionals(*names)
@@ -75,7 +108,7 @@ module Errgonomic
 
         def errgonomic_wrap_optional(name)
           name = name.to_s
-          return if errgonomic_optional_exclusions.include?(name) || errgonomic_optionals.include?(name)
+          return if errgonomic_optional_exclusions.include?(name) || errgonomic_optional?(name)
 
           errgonomic_optionals << name
           class_eval <<-RUBY, __FILE__, __LINE__ + 1
