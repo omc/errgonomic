@@ -32,6 +32,18 @@ ActiveRecord::Schema.define do
     t.timestamps
   end
 
+  create_table 'profiles', force: :cascade do |t|
+    t.string :tagline
+    t.references :author
+    t.timestamps
+  end
+
+  create_table 'awards', force: :cascade do |t|
+    t.string :name, null: false
+    t.references :author
+    t.timestamps
+  end
+
   create_table 'magazines', force: :cascade do |t|
     t.string :title, null: false
     t.string :issn
@@ -56,7 +68,25 @@ Errgonomic::Rails.setup_before
 
 class Author < ActiveRecord::Base
   has_many :books
+  has_one :profile, dependent: :destroy
   include Errgonomic::Rails::ActiveRecordOptional
+  has_one :award, dependent: :destroy
+end
+
+class Profile < ActiveRecord::Base
+  belongs_to :author
+end
+
+class Award < ActiveRecord::Base
+  belongs_to :author
+end
+
+# A has_one declared required asserts the record is there, so its reader is
+# left alone: absence is a validation failure rather than a value.
+class Publisher < ActiveRecord::Base
+  self.table_name = 'authors'
+  include Errgonomic::Rails::ActiveRecordOptional
+  has_one :profile, required: true, foreign_key: :author_id
 end
 
 class Book < ActiveRecord::Base
@@ -95,6 +125,23 @@ end
 class Credential < ActiveRecord::Base
   include Errgonomic::Rails::ActiveRecordOptional
   encrypts :access_secret
+end
+
+# Nested attributes are assigned through the public reader, and ActiveRecord
+# asks whatever it finds there whether it is a new record, so a wrapped
+# singular association cannot survive the round trip.
+class Editor < ActiveRecord::Base
+  self.table_name = 'authors'
+  include Errgonomic::Rails::ActiveRecordOptional
+  has_one :profile, foreign_key: :author_id
+  accepts_nested_attributes_for :profile, allow_destroy: true
+end
+
+class Anthology < ActiveRecord::Base
+  self.table_name = 'books'
+  include Errgonomic::Rails::ActiveRecordOptional
+  belongs_to :author, optional: true
+  accepts_nested_attributes_for :author
 end
 
 # An opt-out named before the include keeps an attribute unwrapped, for
@@ -337,6 +384,78 @@ class BugTest < Minitest::Test
     end
 
     assert_equal %w[issn], quarterly.errgonomic_optionals
+  end
+
+  # A has_one is absent whenever no row points back, so its reader carries
+  # the same absence a nullable column does, whichever side of the include
+  # it is declared on.
+  def test_has_one_reads_as_an_option
+    author = Author.create!(name: 'Cixin Liu')
+
+    assert author.profile.none?
+    assert author.award.none?
+
+    author.create_profile!(tagline: 'writes sci-fi')
+    author.create_award!(name: 'Hugo')
+
+    assert_equal 'writes sci-fi', author.reload.profile.unwrap!.tagline
+    assert_equal 'Hugo', author.award.unwrap!.name
+  end
+
+  # Absence is representable, so the association's own machinery has to keep
+  # working through the wrapper.
+  def test_has_one_writes_and_dependent_destroy_still_work
+    author = Author.create!(name: 'Cixin Liu')
+    author.profile = Profile.new(tagline: 'writes sci-fi')
+    author.save!
+
+    assert_equal 'writes sci-fi', author.reload.profile.unwrap!.tagline
+
+    author.destroy!
+
+    assert_equal 0, Profile.where(author_id: author.id).count
+  end
+
+  # ActiveRecord reads the association, asks it whether it is a new record,
+  # and assigns through it, so the reader has to stay plain for the whole
+  # nested-attributes cycle: build, update, and destroy.
+  def test_nested_attributes_on_a_has_one_keep_working
+    editor = Editor.create!(name: 'Cixin Liu')
+
+    editor.update!(profile_attributes: { tagline: 'writes sci-fi' })
+
+    assert_equal 'writes sci-fi', editor.reload.profile.tagline
+
+    editor.update!(profile_attributes: { id: editor.profile.id, tagline: 'revised' })
+
+    assert_equal 'revised', editor.reload.profile.tagline
+
+    editor.update!(profile_attributes: { id: editor.profile.id, _destroy: '1' })
+
+    assert_nil editor.reload.profile
+  end
+
+  def test_nested_attributes_on_an_optional_belongs_to_keep_working
+    anthology = Anthology.create!(title: 'Wandering Earth', author_attributes: { name: 'Cixin Liu' })
+
+    assert_equal 'Cixin Liu', anthology.reload.author.name
+  end
+
+  # The unwrapped set is discoverable, so a converted model can say which
+  # readers ActiveRecord kept for itself.
+  def test_an_association_with_nested_attributes_is_reported_as_unwrapped
+    refute_includes Editor.errgonomic_optionals, 'profile'
+    refute_includes Anthology.errgonomic_optionals, 'author'
+    assert_includes Anthology.errgonomic_optional_exclusions, 'author'
+  end
+
+  # required: true says the record is always there, which is a validation,
+  # not an absence to represent.
+  def test_a_required_has_one_is_left_unwrapped
+    publisher = Publisher.create!(name: 'Tor', profile: Profile.new(tagline: 'imprint'))
+
+    assert_equal 'imprint', publisher.reload.profile.tagline
+    assert_raises(ActiveRecord::RecordInvalid) { Publisher.create!(name: 'Baen') }
   end
 
   # An inherited reader is already wrapped, and a second wrap nests: Some of

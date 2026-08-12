@@ -19,9 +19,11 @@ module Errgonomic
     #    boundary, so an Option can be passed to where/quote.
     # 4. SomeValidator provides a presence-style validation for Option
     #    attributes.
-    # 5. Attributes declared with encrypts are never wrapped: ActiveRecord
-    #    Encryption registers a length validator outside Model.validators
-    #    that reads the raw value and cannot survive an Option.
+    # 5. Readers that ActiveRecord's own machinery reads raw are never
+    #    wrapped: an attribute declared with encrypts, whose length validator
+    #    sits outside Model.validators and calls to_s on the value, and a
+    #    singular association with nested attributes, which are assigned
+    #    through the reader and ask the value whether it is a new record.
     #
     # errgonomic_optional_except is not on the list: it is configuration, an
     # escape hatch for whatever conflict shows up next, not a semantic
@@ -32,6 +34,9 @@ module Errgonomic
       included do
         reflect_on_all_associations(:belongs_to)
           .select { |r| r.options[:optional] }
+          .each { |r| errgonomic_wrap_optional(r.name) }
+        reflect_on_all_associations(:has_one)
+          .reject { |r| r.options[:required] }
           .each { |r| errgonomic_wrap_optional(r.name) }
       end
 
@@ -61,7 +66,10 @@ module Errgonomic
                         []
                       end
 
-          inherited | Array(encrypted_attributes).map(&:to_s) | Array(try(:errgonomic_optional_exceptions)).map(&:to_s)
+          inherited |
+            Array(encrypted_attributes).map(&:to_s) |
+            Array(try(:errgonomic_optional_exceptions)).map(&:to_s) |
+            errgonomic_nested_attribute_associations
         end
 
         # A model that keeps value-or-nil throughout, for whatever the
@@ -114,6 +122,32 @@ module Errgonomic
         # Wrap it when it arrives, or the conversion is silently partial.
         def belongs_to(name, scope = nil, **options)
           super.tap { errgonomic_wrap_optional(name) if options[:optional] }
+        end
+
+        # A has_one is absent whenever no row points back at the record, so
+        # its reader carries the same absence a nullable column does.
+        # required: true is the exception: it asserts the record is there, and
+        # absence is a validation failure rather than a value to handle.
+        def has_one(name, scope = nil, **options)
+          super.tap { errgonomic_wrap_optional(name) unless options[:required] }
+        end
+
+        # Nested attributes are assigned through the public reader, and
+        # ActiveRecord asks whatever it finds there whether it is a new
+        # record. An absent association has to arrive as nil for that, so a
+        # singular association with nested attributes keeps its plain reader.
+        def accepts_nested_attributes_for(*names, **options)
+          super.tap { errgonomic_unwrap_optionals(*names) }
+        end
+
+        # ActiveRecord keeps its own register of these, so the exclusion can be
+        # read from there rather than recorded as it goes past.
+        def errgonomic_nested_attribute_associations
+          return [] unless respond_to?(:nested_attributes_options)
+
+          nested_attributes_options.keys.map(&:to_s).select do |name|
+            %i[has_one belongs_to].include?(reflect_on_association(name)&.macro)
+          end
         end
 
         # Encryption surrounds an attribute with machinery that reads the raw
