@@ -201,7 +201,7 @@ end
 
 When `Rails::Railtie` is defined, Errgonomic installs a Railtie with two opt-in integrations for ActiveRecord:
 
-- `include Errgonomic::Rails::ActiveRecordOptional` in a model makes its nullable attributes and `optional: true` associations return `Some(value)` or `None()` instead of a value-or-nil. Every nullable column and optional association is wrapped, with no per-attribute opt-in. Two kinds of attribute stay unwrapped: those declared with `encrypts`, whose surrounding machinery reads the raw value, and those named by `errgonomic_optional_except`, which must appear before the include.
+- `include Errgonomic::Rails::ActiveRecordOptional` in a model makes its nullable attributes and `optional: true` associations return `Some(value)` or `None()` instead of a value-or-nil. Every nullable column and optional association is wrapped, with no per-attribute opt-in. An `optional: true` association declared after the include is wrapped as it is declared, so the include can sit at the top of the model with the other concerns. Two kinds of attribute stay unwrapped: those declared with `encrypts`, whose surrounding machinery reads the raw value, and those named by `errgonomic_optional_except`, which must appear before the include.
 
 ```ruby
 class Credential < ApplicationRecord

@@ -99,6 +99,23 @@ class OptedOutCredential < ActiveRecord::Base
   include Errgonomic::Rails::ActiveRecordOptional
 end
 
+# Rails convention puts a concern at the top of a model, above its
+# associations, so an optional belongs_to is routinely declared after the
+# include.
+class LateAssociationBook < ActiveRecord::Base
+  self.table_name = 'books'
+  include Errgonomic::Rails::ActiveRecordOptional
+  belongs_to :author, optional: true
+end
+
+# An opt-out names an association the same way it names an attribute.
+class OptedOutBook < ActiveRecord::Base
+  self.table_name = 'books'
+  errgonomic_optional_except :author
+  belongs_to :author, optional: true
+  include Errgonomic::Rails::ActiveRecordOptional
+end
+
 class BugTest < Minitest::Test
   def test_optional_attributes
     author = Author.create!(name: 'Cixin Liu')
@@ -219,6 +236,24 @@ class BugTest < Minitest::Test
 
     assert_nil credential.access_secret
     assert credential.reload.access_secret.nil?
+  end
+
+  # Wrapping only what the class already declared makes the include's
+  # position load-bearing, and a partial conversion is silent.
+  def test_optional_belongs_to_declared_after_the_include_is_wrapped
+    author = Author.create!(name: 'Cixin Liu')
+    book = LateAssociationBook.create!(title: 'The Dark Forest', author_id: author.id)
+
+    assert book.author.some?
+    assert_equal author.name, book.author.unwrap!.name
+    assert LateAssociationBook.create!(title: 'The Wandering Earth').author.none?
+  end
+
+  def test_errgonomic_optional_except_skips_named_associations
+    author = Author.create!(name: 'Cixin Liu')
+    book = OptedOutBook.create!(title: 'The Dark Forest', author_id: author.id)
+
+    assert_equal author.name, book.author.name
   end
 
   def test_errgonomic_optional_except_skips_named_attributes
