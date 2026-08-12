@@ -9,15 +9,20 @@ module Errgonomic
       extend ActiveSupport::Concern
 
       class_methods do
-        # Names attributes that ActiveRecordOptional must leave alone. It has
-        # to be callable before the include, which is what computes the
-        # wrapped set, so it lives here rather than in the concern itself.
+        # Names attributes that ActiveRecordOptional must leave alone. It has to
+        # be callable before the include, which is what starts the wrapping for
+        # a model that converts itself, so it lives here rather than in the
+        # concern. Where the concern is included on a base class there is no
+        # before, so it also takes back a reader already wrapped.
         def errgonomic_optional_except(*names)
           @errgonomic_optional_exceptions = errgonomic_optional_exceptions + names.map(&:to_s)
+          errgonomic_unwrap_optionals(*names) if respond_to?(:errgonomic_unwrap_optionals)
+          @errgonomic_optional_exceptions
         end
 
         def errgonomic_optional_exceptions
-          @errgonomic_optional_exceptions ||= []
+          @errgonomic_optional_exceptions ||=
+            superclass.respond_to?(:errgonomic_optional_exceptions) ? superclass.errgonomic_optional_exceptions.dup : []
         end
 
         def delegate_optional(*methods, to: nil, prefix: nil, private: nil)

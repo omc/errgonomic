@@ -32,6 +32,12 @@ ActiveRecord::Schema.define do
     t.timestamps
   end
 
+  create_table 'magazines', force: :cascade do |t|
+    t.string :title, null: false
+    t.string :issn
+    t.timestamps
+  end
+
   create_table 'credentials', force: :cascade do |t|
     t.string :access_key, limit: 255
     t.string :access_secret, limit: 255
@@ -97,6 +103,64 @@ class OptedOutCredential < ActiveRecord::Base
   self.table_name = 'credentials'
   errgonomic_optional_except :access_key
   include Errgonomic::Rails::ActiveRecordOptional
+end
+
+# Rails convention puts a concern at the top of a model, above its
+# associations, so an optional belongs_to is routinely declared after the
+# include.
+class LateAssociationBook < ActiveRecord::Base
+  self.table_name = 'books'
+  include Errgonomic::Rails::ActiveRecordOptional
+  belongs_to :author, optional: true
+end
+
+# An opt-out names an association the same way it names an attribute.
+class OptedOutBook < ActiveRecord::Base
+  self.table_name = 'books'
+  errgonomic_optional_except :author
+  belongs_to :author, optional: true
+  include Errgonomic::Rails::ActiveRecordOptional
+end
+
+# A subclass has its own schema state, so it reaches the wrapping seam a
+# second time for columns its parent already wrapped.
+class Novel < Book; end
+
+# Where the include goes decides how far it reaches. On an application's own
+# base class it reaches every model below, so a model converts without naming
+# errgonomic at all.
+class HouseRecord < ActiveRecord::Base
+  self.abstract_class = true
+  include Errgonomic::Rails::ActiveRecordOptional
+end
+
+# Nothing in these two mentions the concern.
+class Zine < HouseRecord
+  self.table_name = 'magazines'
+end
+
+class Chapbook < HouseRecord
+  self.table_name = 'books'
+  belongs_to :author, optional: true
+end
+
+# A model that keeps value-or-nil throughout.
+class PlainZine < HouseRecord
+  self.table_name = 'magazines'
+  errgonomic_optional_off
+end
+
+# One attribute back to value-or-nil, in a model with no include to declare it
+# before.
+class PartlyPlainZine < HouseRecord
+  self.table_name = 'magazines'
+  errgonomic_optional_except :issn
+end
+
+# A model from a gem descends straight from ActiveRecord::Base, as engine
+# models do, so an application's base class does not reach it.
+class VendorLedger < ActiveRecord::Base
+  self.table_name = 'magazines'
 end
 
 class BugTest < Minitest::Test
@@ -219,6 +283,99 @@ class BugTest < Minitest::Test
 
     assert_nil credential.access_secret
     assert credential.reload.access_secret.nil?
+  end
+
+  # ActiveRecord loads a model's schema on first use, not at definition, so a
+  # class body must not need a database. Wrapping at include time did, and
+  # any boot that loads models without a reachable database — an asset build,
+  # an image build, a schema check — then fails on the include.
+  def test_including_the_concern_does_not_reach_for_the_schema
+    statements = []
+    subscription = ActiveSupport::Notifications.subscribe('sql.active_record') do |*, payload|
+      statements << payload[:sql]
+    end
+
+    magazine = Class.new(ActiveRecord::Base) do
+      def self.name = 'Magazine'
+      self.table_name = 'magazines'
+      include Errgonomic::Rails::ActiveRecordOptional
+    end
+
+    ActiveSupport::Notifications.unsubscribe(subscription)
+
+    assert_empty statements
+    assert magazine.create!(title: 'Nature').issn.none?
+  end
+
+  # What a model wrapped is how a conversion is checked, so it has to answer
+  # for the columns too, before anything else has touched the model.
+  def test_the_wrapped_set_is_reported_before_the_schema_is_used
+    quarterly = Class.new(ActiveRecord::Base) do
+      def self.name = 'Quarterly'
+      self.table_name = 'magazines'
+      include Errgonomic::Rails::ActiveRecordOptional
+    end
+
+    assert_equal %w[issn], quarterly.errgonomic_optionals
+  end
+
+  # An inherited reader is already wrapped, and a second wrap nests: Some of
+  # a Some for a present value, while an absent one collapses back to None
+  # because None answers nil?. Half of it is silent.
+  def test_a_subclass_reads_its_inherited_wrapped_attributes_once
+    author = Author.create!(name: 'Cixin Liu')
+    novel = Novel.create!(title: 'Death\'s End', author_id: author.id, isbn: '9780765377104')
+
+    assert_equal '9780765377104', novel.isbn.unwrap!
+    assert_equal author.id, novel.author.unwrap!.id
+    assert Novel.create!(title: 'Supernova Era').isbn.none?
+  end
+
+  # An include on a base class reaches every model below it, columns and
+  # associations alike, which is how an application converts all at once.
+  def test_a_base_class_include_reaches_the_models_below_it
+    assert Zine.create!(title: 'Nature').issn.none?
+    assert_equal %w[issn], Zine.errgonomic_optionals
+
+    author = Author.create!(name: 'Cixin Liu')
+
+    assert_equal author.id, Chapbook.create!(title: 'The Wandering Earth II', author_id: author.id).author.unwrap!.id
+    assert Chapbook.create!(title: 'Supernova Era').author.none?
+  end
+
+  # A model whose own code reads its attributes raw has to be able to say so,
+  # in a model body with no include to point at.
+  def test_a_model_below_the_base_class_can_opt_out_entirely
+    assert_nil PlainZine.create!(title: 'Asimovs').issn
+    assert_empty PlainZine.errgonomic_optionals
+  end
+
+  def test_a_model_below_the_base_class_can_opt_out_one_attribute
+    assert_equal '1937-7843', PartlyPlainZine.create!(title: 'Clarkesworld', issn: '1937-7843').issn
+  end
+
+  # Engine and gem models descend straight from ActiveRecord::Base, and their
+  # own code knows nothing about an Option.
+  def test_a_model_outside_the_base_class_is_untouched
+    assert_nil VendorLedger.create!(title: 'Ledger').issn
+  end
+
+  # Wrapping only what the class already declared makes the include's
+  # position load-bearing, and a partial conversion is silent.
+  def test_optional_belongs_to_declared_after_the_include_is_wrapped
+    author = Author.create!(name: 'Cixin Liu')
+    book = LateAssociationBook.create!(title: 'The Dark Forest', author_id: author.id)
+
+    assert book.author.some?
+    assert_equal author.name, book.author.unwrap!.name
+    assert LateAssociationBook.create!(title: 'The Wandering Earth').author.none?
+  end
+
+  def test_errgonomic_optional_except_skips_named_associations
+    author = Author.create!(name: 'Cixin Liu')
+    book = OptedOutBook.create!(title: 'The Dark Forest', author_id: author.id)
+
+    assert_equal author.name, book.author.name
   end
 
   def test_errgonomic_optional_except_skips_named_attributes
