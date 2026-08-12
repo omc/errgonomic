@@ -168,6 +168,11 @@ module Errgonomic
           end
         end
 
+        # The reader guards against re-entering itself with a flag on the
+        # record. Bookkeeping shared across records would have to build a key
+        # per read, and this reader is on the hot path of every wrapped
+        # attribute. A record read from two threads at once is out of scope,
+        # as it is for ActiveRecord itself.
         def errgonomic_wrap_optional(name)
           name = name.to_s
           return if errgonomic_optional_off?
@@ -176,18 +181,20 @@ module Errgonomic
           errgonomic_optional_names << name
           class_eval <<-RUBY, __FILE__, __LINE__ + 1
             def #{name}
-              reads = Thread.current[:errgonomic_optional_reads] ||= {}
-              key = [object_id, :#{name}]
-              if reads[key]
-                raise Errgonomic::RecursiveOptionalReadError,
-                      "\#{self.class}##{name} re-entered itself; something beneath this reader reads it again"
+              if @__errgonomic_reading_#{name}
+                raise Errgonomic::RecursiveOptionalReadError, <<~MSG
+                  \#{self.class}##{name} re-entered itself; something beneath this reader reads it again.
+                  If this read was not recursive, the record may have been read from two threads at once,
+                  which this guard cannot tell apart. Please report that at
+                  https://github.com/omc/errgonomic/issues
+                MSG
               end
 
-              reads[key] = true
+              @__errgonomic_reading_#{name} = true
               begin
                 val = super
               ensure
-                reads.delete(key)
+                @__errgonomic_reading_#{name} = false
               end
               val.nil? ? Errgonomic::Option::None.new : Errgonomic::Option::Some.new(val)
             end

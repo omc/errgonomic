@@ -305,6 +305,25 @@ class BugTest < Minitest::Test
     deeper(1100) { assert_equal 'writes sci-fi', author.bio.unwrap! }
   end
 
+  # A wrapped read sits on the hot path of every converted model, so the only
+  # allocation it may make is the Option it returns.
+  def test_a_wrapped_read_allocates_only_the_option_it_returns
+    author = Author.create!(name: 'Cixin Liu', bio: 'writes sci-fi')
+    author.bio
+
+    # Difference two runs so the measurement itself cancels out and only the
+    # per-read allocation is left.
+    before = GC.stat(:total_allocated_objects)
+    100.times { author.bio }
+    hundred = GC.stat(:total_allocated_objects)
+    200.times { author.bio }
+    three_hundred = GC.stat(:total_allocated_objects)
+
+    assert_equal 100, (three_hundred - hundred) - (hundred - before)
+  end
+
+  # A read that re-enters itself still has to say so at the first re-entry,
+  # naming the reader, rather than unwinding as a stack overflow.
   def test_recursive_read_raises_a_named_error_at_first_reentry
     author = LoopyAuthor.create!(name: 'Cixin Liu', bio: 'writes sci-fi')
     error = assert_raises(Errgonomic::RecursiveOptionalReadError) { author.bio }
