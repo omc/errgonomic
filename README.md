@@ -201,7 +201,7 @@ end
 
 When `Rails::Railtie` is defined, Errgonomic installs a Railtie with two opt-in integrations for ActiveRecord:
 
-- `include Errgonomic::Rails::ActiveRecordOptional` in a model makes its nullable attributes and `optional: true` associations return `Some(value)` or `None()` instead of a value-or-nil. Every nullable column and optional association is wrapped, with no per-attribute opt-in. An `optional: true` association declared after the include is wrapped as it is declared, so the include can sit at the top of the model with the other concerns. Two kinds of attribute stay unwrapped: those declared with `encrypts`, whose surrounding machinery reads the raw value, and those named by `errgonomic_optional_except`, which must appear before the include.
+- `include Errgonomic::Rails::ActiveRecordOptional` in a model makes its nullable attributes and `optional: true` associations return `Some(value)` or `None()` instead of a value-or-nil. Every nullable column and optional association is wrapped, with no per-attribute opt-in. Two kinds of attribute stay unwrapped: those declared with `encrypts`, whose surrounding machinery reads the raw value, and those named by `errgonomic_optional_except`.
 
 ```ruby
 class Credential < ApplicationRecord
@@ -211,6 +211,44 @@ class Credential < ApplicationRecord
   encrypts :access_secret   # also left unwrapped, declared either side of the include
 end
 ```
+
+**Where the include goes.** A model that includes the concern converts itself, and only itself. The include may sit at the top of the model with the other concerns, which is where Rails convention puts one. An `optional: true` association declared below it is wrapped as it is declared, rather than only the associations the class happened to declare above it.
+
+```ruby
+class Book < ApplicationRecord
+  include Errgonomic::Rails::ActiveRecordOptional
+
+  belongs_to :author, optional: true   # Some(author) or None()
+end
+```
+
+On an application's own base class, the same include reaches every model below it, and no model mentions errgonomic again:
+
+```ruby
+class ApplicationRecord < ActiveRecord::Base
+  primary_abstract_class
+  include Errgonomic::Rails::ActiveRecordOptional
+end
+```
+
+Converting one model or all of them is therefore where the include goes, not a setting to choose. The association macros wrap as each model declares them, and a model's nullable columns are wrapped when ActiveRecord loads its schema, so no class body needs a database while it loads.
+
+An application's own base class is the useful place for it. Engine and gem models such as `ActiveStorage::Blob` and `PaperTrail::Version` descend straight from `ActiveRecord::Base`, and their own code reads their attributes knowing nothing about an Option. Including it on `ActiveRecord::Base` reaches those too, which is rarely what anyone wants.
+
+Two ways out, both readable in a model with no include of its own to point at:
+
+```ruby
+class LegacyImport < ApplicationRecord
+  errgonomic_optional_off                     # this model keeps value-or-nil throughout
+end
+
+class Credential < ApplicationRecord
+  errgonomic_optional_except :legacy_token    # this attribute does
+end
+```
+
+`Model.errgonomic_optionals` reports which readers a model wrapped, which is how to check that a conversion did what it meant to.
+
 - `delegate_optional :name, to: :association` (available on all models) delegates through an optional association, returning an Option instead of raising on nil.
 
 `Object#to_option` is also available in Rails to lift any value into an Option (`nil.to_option # => None()`).

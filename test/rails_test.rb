@@ -126,6 +126,43 @@ end
 # second time for columns its parent already wrapped.
 class Novel < Book; end
 
+# Where the include goes decides how far it reaches. On an application's own
+# base class it reaches every model below, so a model converts without naming
+# errgonomic at all.
+class HouseRecord < ActiveRecord::Base
+  self.abstract_class = true
+  include Errgonomic::Rails::ActiveRecordOptional
+end
+
+# Nothing in these two mentions the concern.
+class Zine < HouseRecord
+  self.table_name = 'magazines'
+end
+
+class Chapbook < HouseRecord
+  self.table_name = 'books'
+  belongs_to :author, optional: true
+end
+
+# A model that keeps value-or-nil throughout.
+class PlainZine < HouseRecord
+  self.table_name = 'magazines'
+  errgonomic_optional_off
+end
+
+# One attribute back to value-or-nil, in a model with no include to declare it
+# before.
+class PartlyPlainZine < HouseRecord
+  self.table_name = 'magazines'
+  errgonomic_optional_except :issn
+end
+
+# A model from a gem descends straight from ActiveRecord::Base, as engine
+# models do, so an application's base class does not reach it.
+class VendorLedger < ActiveRecord::Base
+  self.table_name = 'magazines'
+end
+
 class BugTest < Minitest::Test
   def test_optional_attributes
     author = Author.create!(name: 'Cixin Liu')
@@ -292,6 +329,35 @@ class BugTest < Minitest::Test
     assert_equal '9780765377104', novel.isbn.unwrap!
     assert_equal author.id, novel.author.unwrap!.id
     assert Novel.create!(title: 'Supernova Era').isbn.none?
+  end
+
+  # An include on a base class reaches every model below it, columns and
+  # associations alike, which is how an application converts all at once.
+  def test_a_base_class_include_reaches_the_models_below_it
+    assert Zine.create!(title: 'Nature').issn.none?
+    assert_equal %w[issn], Zine.errgonomic_optionals
+
+    author = Author.create!(name: 'Cixin Liu')
+
+    assert_equal author.id, Chapbook.create!(title: 'The Wandering Earth II', author_id: author.id).author.unwrap!.id
+    assert Chapbook.create!(title: 'Supernova Era').author.none?
+  end
+
+  # A model whose own code reads its attributes raw has to be able to say so,
+  # in a model body with no include to point at.
+  def test_a_model_below_the_base_class_can_opt_out_entirely
+    assert_nil PlainZine.create!(title: 'Asimovs').issn
+    assert_empty PlainZine.errgonomic_optionals
+  end
+
+  def test_a_model_below_the_base_class_can_opt_out_one_attribute
+    assert_equal '1937-7843', PartlyPlainZine.create!(title: 'Clarkesworld', issn: '1937-7843').issn
+  end
+
+  # Engine and gem models descend straight from ActiveRecord::Base, and their
+  # own code knows nothing about an Option.
+  def test_a_model_outside_the_base_class_is_untouched
+    assert_nil VendorLedger.create!(title: 'Ledger').issn
   end
 
   # Wrapping only what the class already declared makes the include's

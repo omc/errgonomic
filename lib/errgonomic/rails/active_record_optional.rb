@@ -30,9 +30,6 @@ module Errgonomic
       extend ActiveSupport::Concern
 
       included do
-        # ::Rails.logger.debug('ActiveRecordOptional')
-        @errgonomic_optional_exclusions =
-          Array(encrypted_attributes).map(&:to_s) + Array(try(:errgonomic_optional_exceptions)).map(&:to_s)
         reflect_on_all_associations(:belongs_to)
           .select { |r| r.options[:optional] }
           .each { |r| errgonomic_wrap_optional(r.name) }
@@ -50,16 +47,35 @@ module Errgonomic
         # The set as it stands, for the wrapping itself: reaching for the
         # schema from here would ask the schema to load while it is loading.
         def errgonomic_optional_names
-          @errgonomic_optionals ||= []
+          @errgonomic_optional_names ||= []
         end
 
+        # Read when a reader is about to be wrapped rather than snapshotted at
+        # include time, so an exclusion works on either side of the include.
+        # That is what an include on a base class needs: there is no "before"
+        # for a model to declare anything in.
         def errgonomic_optional_exclusions
-          @errgonomic_optional_exclusions ||=
-            if superclass.respond_to?(:errgonomic_optional_exclusions)
-              superclass.errgonomic_optional_exclusions.dup
-            else
-              []
-            end
+          inherited = if superclass.respond_to?(:errgonomic_optional_exclusions)
+                        superclass.errgonomic_optional_exclusions
+                      else
+                        []
+                      end
+
+          inherited | Array(encrypted_attributes).map(&:to_s) | Array(try(:errgonomic_optional_exceptions)).map(&:to_s)
+        end
+
+        # A model that keeps value-or-nil throughout, for whatever the
+        # application knows about it that the concern does not. Where the
+        # concern is included on a base class, this is how a model leaves.
+        def errgonomic_optional_off
+          @errgonomic_optional_off = true
+          errgonomic_unwrap_optionals(*errgonomic_optional_names.dup)
+        end
+
+        def errgonomic_optional_off?
+          return true if defined?(@errgonomic_optional_off) && @errgonomic_optional_off
+
+          superclass.respond_to?(:errgonomic_optional_off?) && superclass.errgonomic_optional_off?
         end
 
         # A reader wrapped by an ancestor is already an Option; a subclass
@@ -85,6 +101,11 @@ module Errgonomic
         # before a subclass considers the same name.
         def errgonomic_wrap_nullable_columns
           superclass.errgonomic_wrap_nullable_columns if superclass.respond_to?(:errgonomic_wrap_nullable_columns)
+          # An abstract class has no table, and asking one for its columns
+          # raises. The concern belongs on an abstract class all the same: that
+          # is where an application puts behaviour every model should have.
+          return if abstract_class? || table_name.nil?
+
           column_names.each { |name| errgonomic_wrap_optional(name) if column_for_attribute(name).null }
         end
 
@@ -98,14 +119,11 @@ module Errgonomic
         # Encryption surrounds an attribute with machinery that reads the raw
         # value, including a length validator that calls to_s on it, so a
         # wrapped encrypted attribute cannot be saved. Declaring encrypts
-        # after the include is the ordinary spelling, so record the exclusion
-        # for whenever the schema arrives, and take back any reader already
-        # wrapped.
+        # after the include is the ordinary spelling, and the exclusion is read
+        # from ActiveRecord's own register when a reader is about to be
+        # wrapped, so this only has to take back a reader already wrapped.
         def encrypts(*names, **options)
-          super.tap do
-            errgonomic_optional_exclusions.concat(names.map(&:to_s))
-            errgonomic_unwrap_optionals(*names)
-          end
+          super.tap { errgonomic_unwrap_optionals(*names) }
         end
 
         def errgonomic_unwrap_optionals(*names)
@@ -118,6 +136,7 @@ module Errgonomic
 
         def errgonomic_wrap_optional(name)
           name = name.to_s
+          return if errgonomic_optional_off?
           return if errgonomic_optional_exclusions.include?(name) || errgonomic_optional?(name)
 
           errgonomic_optional_names << name

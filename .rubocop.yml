@@ -18,6 +18,7 @@ Metrics/ClassLength:
   Exclude:
     - lib/errgonomic/option.rb
     - lib/errgonomic/result.rb
+    - test/**/*
 
 # core_ext vendors ActiveSupport's blank?/present? patches; the reopened core
 # classes there are explained by the file header, not per class. Test
@@ -25,4 +26,24 @@ Metrics/ClassLength:
 Style/Documentation:
   Exclude:
     - lib/errgonomic/core_ext/**/*
+    - test/**/*
+
+# A test states one behavior end to end, and splitting one to satisfy a size
+# metric hides the behavior it was written to name. A cop that names its own
+# Exclude replaces this one, so Metrics/ClassLength repeats the path above.
+Metrics:
+  Exclude:
+    - test/**/*
+
+# The ActiveRecord hooks in the optional concern are one subject — where a
+# reader may come from and what leaves it alone — and reading them together is
+# the point. The generated reader is a heredoc, which the length cops count as
+# if it were code.
+Metrics/BlockLength:
+  Exclude:
+    - lib/errgonomic/rails/active_record_optional.rb
+    - test/**/*
+Metrics/MethodLength:
+  Exclude:
+    - lib/errgonomic/rails/active_record_optional.rb
     - test/**/*
