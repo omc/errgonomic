@@ -201,7 +201,7 @@ end
 
 When `Rails::Railtie` is defined, Errgonomic installs a Railtie with two opt-in integrations for ActiveRecord:
 
-- `include Errgonomic::Rails::ActiveRecordOptional` in a model makes its nullable attributes and `optional: true` associations return `Some(value)` or `None()` instead of a value-or-nil. Every nullable column and optional association is wrapped, with no per-attribute opt-in. Two kinds of attribute stay unwrapped: those declared with `encrypts`, whose surrounding machinery reads the raw value, and those named by `errgonomic_optional_except`.
+- `include Errgonomic::Rails::ActiveRecordOptional` in a model makes its nullable attributes and `optional: true` associations return `Some(value)` or `None()` instead of a value-or-nil. Every nullable column and optional association is wrapped, with no per-attribute opt-in. Three kinds of reader stay unwrapped: attributes declared with `encrypts` and singular associations with `accepts_nested_attributes_for`, both of which ActiveRecord's own machinery reads raw, and anything named by `errgonomic_optional_except`.
 
 ```ruby
 class Credential < ApplicationRecord
@@ -209,6 +209,8 @@ class Credential < ApplicationRecord
   include Errgonomic::Rails::ActiveRecordOptional
 
   encrypts :access_secret   # also left unwrapped, declared either side of the include
+  has_one :rotation_schedule # wrapped: Some(schedule) or None()
+  has_one :owner, required: true # left unwrapped: absence is a validation failure
 end
 ```
 
