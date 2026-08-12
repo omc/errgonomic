@@ -270,6 +270,18 @@ class BugTest < Minitest::Test
     assert magazine.create!(title: 'Nature').issn.none?
   end
 
+  # What a model wrapped is how a conversion is checked, so it has to answer
+  # for the columns too, before anything else has touched the model.
+  def test_the_wrapped_set_is_reported_before_the_schema_is_used
+    quarterly = Class.new(ActiveRecord::Base) do
+      def self.name = 'Quarterly'
+      self.table_name = 'magazines'
+      include Errgonomic::Rails::ActiveRecordOptional
+    end
+
+    assert_equal %w[issn], quarterly.errgonomic_optionals
+  end
+
   # An inherited reader is already wrapped, and a second wrap nests: Some of
   # a Some for a present value, while an absent one collapses back to None
   # because None answers nil?. Half of it is silent.

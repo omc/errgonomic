@@ -39,7 +39,17 @@ module Errgonomic
       end
 
       class_methods do
+        # What a model wrapped is the signal that a conversion did what it
+        # meant to, and the columns are not wrapped until the schema loads, so
+        # asking loads it.
         def errgonomic_optionals
+          load_schema
+          errgonomic_optional_names
+        end
+
+        # The set as it stands, for the wrapping itself: reaching for the
+        # schema from here would ask the schema to load while it is loading.
+        def errgonomic_optional_names
           @errgonomic_optionals ||= []
         end
 
@@ -55,7 +65,7 @@ module Errgonomic
         # A reader wrapped by an ancestor is already an Option; a subclass
         # that wrapped it again would nest it.
         def errgonomic_optional?(name)
-          return true if errgonomic_optionals.include?(name)
+          return true if errgonomic_optional_names.include?(name)
 
           superclass.respond_to?(:errgonomic_optional?) && superclass.errgonomic_optional?(name)
         end
@@ -100,7 +110,7 @@ module Errgonomic
 
         def errgonomic_unwrap_optionals(*names)
           names.map(&:to_s).each do |name|
-            next unless errgonomic_optionals.delete(name)
+            next unless errgonomic_optional_names.delete(name)
 
             remove_method(name)
           end
@@ -110,7 +120,7 @@ module Errgonomic
           name = name.to_s
           return if errgonomic_optional_exclusions.include?(name) || errgonomic_optional?(name)
 
-          errgonomic_optionals << name
+          errgonomic_optional_names << name
           class_eval <<-RUBY, __FILE__, __LINE__ + 1
             def #{name}
               reads = Thread.current[:errgonomic_optional_reads] ||= {}
