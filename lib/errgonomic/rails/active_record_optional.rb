@@ -224,6 +224,18 @@ class Object
 end
 
 module Errgonomic
+  module Option
+    # An Option is already lifted. Lifting it again would nest it, and the
+    # nesting is invisible until something reaches for the inner value.
+    class Any
+      def to_option
+        self
+      end
+    end
+  end
+end
+
+module Errgonomic
   module Rails
     # Teach ActiveRecord SQL quoting to unwrap Options, quoting a None as
     # SQL NULL.

@@ -244,6 +244,26 @@ class BugTest < Minitest::Test
     assert_raises(Errgonomic::SerializeError) { [Ok(5)].to_json }
   end
 
+  # to_option lifts a value that may be nil. An Option is already lifted, and
+  # a second lift nests invisibly: Some(Some(x)) still answers some?, so the
+  # mistake surfaces far from where it was made.
+  def test_to_option_is_idempotent
+    assert_equal Some(1), Some(1).to_option
+    assert_equal 1, Some(1).to_option.unwrap!
+    assert None().to_option.none?
+  end
+
+  # The shape an application reaches for around an unwrapped association:
+  # lift it, then reach through it for an attribute that is already an Option.
+  def test_to_option_composes_through_an_unwrapped_association
+    author = Author.create!(name: 'Cixin Liu', bio: 'writes sci-fi')
+    shelved = Book.create!(title: 'The Dark Forest', author_id: author.id)
+    unshelved = Book.create!(title: 'Supernova Era')
+
+    assert_equal 'writes sci-fi', shelved.author.to_option.and_then(&:bio).unwrap_or('unknown')
+    assert_equal 'unknown', unshelved.author.to_option.and_then(&:bio).unwrap_or('unknown')
+  end
+
   def test_delegate_optional
     author = Author.create!(name: 'Cixin Liu')
     book = author.books.create!(title: 'Death\'s End')
