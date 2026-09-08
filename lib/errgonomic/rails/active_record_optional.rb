@@ -148,34 +148,8 @@ module Errgonomic
             errgonomic_nested_attribute_associations
         end
 
-        # How a None reaches a payload. :null writes it as null, which is
-        # what Rails does with nil and what serde does with None unless a
-        # field asks otherwise, so it is the default and needs no
-        # declaration. :omit leaves the key out instead. only: and except:
-        # scope the mode to named readers, and a reader outside the scope
-        # keeps the default.
-        def errgonomic_serialize_none(mode, only: nil, except: nil)
-          unless %i[null omit].include?(mode)
-            raise ::ArgumentError, "errgonomic_serialize_none takes :null or :omit, not #{mode.inspect}"
-          end
-
-          @errgonomic_serialize_none = {
-            mode: mode,
-            only: only && Array(only).map(&:to_s),
-            except: except && Array(except).map(&:to_s)
-          }
-        end
-
-        # The nearest declaration is the whole story for a class: it replaces
-        # whatever it inherits rather than layering onto it, so a scoped one
-        # leaves every reader it does not name at the default.
-        def errgonomic_serialize_none_declaration
-          return @errgonomic_serialize_none if defined?(@errgonomic_serialize_none)
-          return nil unless superclass.respond_to?(:errgonomic_serialize_none_declaration)
-
-          superclass.errgonomic_serialize_none_declaration
-        end
-
+        # A wrapped reader whose absent value the declaration in force asks
+        # to be left out of a payload rather than written as null.
         def errgonomic_serialize_none_omit?(name)
           declaration = errgonomic_serialize_none_declaration
           return false unless declaration && declaration[:mode] == :omit

@@ -511,6 +511,14 @@ class ExceptedBook < TerseRecord
   errgonomic_serialize_none :omit, except: %i[isbn]
 end
 
+# Rails convention puts a concern at the top of a model, but configuration
+# reads as well above the include as below it, so it has to work either way.
+class EarlyTerseBook < ActiveRecord::Base
+  self.table_name = 'books'
+  errgonomic_serialize_none :omit
+  include Errgonomic::Rails::ActiveRecordOptional
+end
+
 class BugTest < Minitest::Test
   def test_optional_attributes
     author = Author.create!(name: 'Cixin Liu')
@@ -687,6 +695,14 @@ class BugTest < Minitest::Test
 
     assert_equal '9780765377104', present['isbn']
     refute_includes present, 'published_at'
+  end
+
+  # A declaration above the include says the same thing as one below it.
+  def test_serialize_none_is_declared_on_either_side_of_the_include
+    hash = EarlyTerseBook.find(Book.create!(title: 'Supernova Era').id).as_json
+
+    refute_includes hash, 'isbn'
+    assert_equal 'Supernova Era', hash['title']
   end
 
   # A model below the declaration says :null and is back to the default.

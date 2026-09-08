@@ -309,7 +309,7 @@ class Book < ApplicationRecord
 end
 ```
 
-The nearest declaration wins and replaces whatever it inherits, rather than layering onto it, so a reader a scoped declaration does not name keeps the default. Omission drops keys from the payload the caller asked for, so it composes with the caller's own `only:` and `except:`. A mode other than `:null` or `:omit` raises `ArgumentError` where it is written.
+The declaration reads as well above the include as below it, as `errgonomic_optional_except` does. The nearest declaration wins and replaces whatever it inherits, rather than layering onto it, so a reader a scoped declaration does not name keeps the default. Omission drops keys from the payload the caller asked for, so it composes with the caller's own `only:` and `except:`. A mode other than `:null` or `:omit` raises `ArgumentError` where it is written.
 
 `Model.errgonomic_optionals` reports which readers a model wrapped, including nullable foreign-key columns, so `book.author_id` is `Some(1)` alongside `book.author`. That is how to check that a conversion did what it meant to.
 
