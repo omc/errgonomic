@@ -11,7 +11,7 @@ module Errgonomic
       # YARD does not see through a concern's class_methods block, so the
       # method it documents is declared rather than read.
       #
-      # @!method delegate_optional(*methods, to: nil, prefix: nil, private: nil)
+      # @!method delegate_optional(*methods, to: nil, prefix: nil, private: nil, allow_nil: nil)
       #   @example prefix forms name the reader, as they do for Rails' delegate
       #     article = Article.create!(title: 'Omelas', author: Author.create!(name: 'Ursula', bio: 'writes'))
       #     article.author_name # => Some('Ursula')
@@ -120,13 +120,11 @@ module Errgonomic
           end
         end
 
-        # Both ends are lifted exactly one layer, so a target that is a record,
-        # a nil or an Option all delegate, and a delegated reader that answers
-        # an Option comes back as one Option rather than two. The call is
-        # written out rather than sent, so the target's method is reached on
-        # the same terms a caller would reach it on. It is defined against the
-        # declaration's own file and line, so a backtrace and source_location
-        # name the model rather than this generator.
+        # Both ends lift exactly one layer, so a record, a nil and an Option
+        # all delegate, and an Option the call returns is not wrapped twice.
+        # The call is written out rather than sent, so the target's method is
+        # reached on the same terms a caller would reach it on, and the reader
+        # takes the declaration's file and line so a backtrace names the model.
         def define_optional_delegation(to, method_name, reader, declared_at)
           class_eval <<-RUBY, declared_at.path, declared_at.lineno # rubocop:disable Style/EvalWithLocation
             def #{reader}(...)
