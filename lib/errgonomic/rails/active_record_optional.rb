@@ -438,6 +438,16 @@ module Errgonomic
     def self.unwrap_option(value)
       value.is_a?(Errgonomic::Option::Any) ? value.unwrap_or(nil) : value
     end
+
+    # Unwrap each value of a hash one layer, where the boundary takes a row
+    # or a set of conditions rather than a single value. A nested structure
+    # is the caller's own, and is left as it is.
+    #
+    # @example
+    #   Errgonomic::Rails.unwrap_option_values(title: Some('x'), body: None()) # => { title: 'x', body: nil }
+    def self.unwrap_option_values(hash)
+      hash.transform_values { |value| unwrap_option(value) }
+    end
   end
 end
 
@@ -560,3 +570,30 @@ module Errgonomic
 end
 
 ActiveRecord::Relation::QueryAttribute.prepend(Errgonomic::Rails::ActiveRecordQueryAttribute)
+
+module Errgonomic
+  module Rails
+    # find and find_by choose their path before any bind exists: an id or a
+    # condition the statement cache cannot express is sent to the relation
+    # instead. A None has to arrive as nil for that choice, so an absent
+    # value asks for IS NULL rather than an equality that can never match.
+    module ActiveRecordFind
+      # A raw SQL condition is left alone, so an Option interpolated into one
+      # still raises rather than binding quietly.
+      #
+      # @example
+      #   note = Note.create!(body: 'Ball Lightning')
+      #   Note.find_by(id: note.id, title: None()) == note # => true
+      #   Note.find(Some(note.id)) == note # => true
+      def find_by(*args)
+        super(*args.map { |arg| arg.is_a?(Hash) ? Errgonomic::Rails.unwrap_option_values(arg) : arg })
+      end
+
+      def find(*ids, &block)
+        super(*ids.map { |id| Errgonomic::Rails.unwrap_option(id) }, &block)
+      end
+    end
+  end
+end
+
+ActiveRecord::Core::ClassMethods.prepend(Errgonomic::Rails::ActiveRecordFind)

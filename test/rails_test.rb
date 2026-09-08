@@ -642,6 +642,19 @@ class BugTest < Minitest::Test
     assert_equal note.id, Note.find_by(meta: Some({ 'isbn' => '9780765377104' })).id
   end
 
+  # A None means absent, and find_by asks the statement cache for an equality
+  # bind, which can never match a NULL. Unwrapping before find_by decides
+  # sends it down the relation path instead, where the predicate builder
+  # renders IS NULL, so find_by(col: None()) says what find_by(col: nil) says.
+  def test_find_by_with_a_none_asks_for_null
+    untitled = Note.create!(body: 'Ball Lightning')
+
+    assert_equal untitled.id, Note.find_by(id: untitled.id, title: None()).id
+    assert_equal untitled.id, Note.find_by(id: untitled.id, meta: None()).id
+    assert_equal untitled.id, Note.find_by(id: untitled.id, title: nil).id
+    assert_nil Note.find_by(id: untitled.id, title: Some('The Dark Forest'))
+  end
+
   # find and exists? bind through the same query attribute find_by does, so a
   # Some has to arrive there as its inner value as well.
   def test_find_and_exists_take_an_option_on_a_primary_key
@@ -650,6 +663,14 @@ class BugTest < Minitest::Test
 
     assert_equal genre.id, Genre.find(book.genre_id).id
     assert Genre.exists?(id: Some(genre.id))
+  end
+
+  # An absent id is no id, so find says what it says for nil rather than
+  # naming the wrapper it could not match.
+  def test_find_with_a_none_reports_a_missing_id
+    error = assert_raises(ActiveRecord::RecordNotFound) { Genre.find(None()) }
+
+    assert_equal 'Couldn\'t find Genre without an ID', error.message
   end
 
   def test_where_with_a_none_asks_for_null
