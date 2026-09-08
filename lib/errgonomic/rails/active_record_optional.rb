@@ -22,11 +22,11 @@ module Errgonomic
     # 2. Some delegates persisted? and touch_later to its record, so a Some
     #    can stand in for it where ActiveRecord reads an association back
     #    through its public reader.
-    # 3. Boundaries into ActiveRecord unwrap Options: quoting and predicate
-    #    building at the SQL boundary, attribute and singular association
-    #    writers on assignment, and the type cast and serialization for a
-    #    value that reaches the database without passing a writer, as
-    #    update_all, insert_all, upsert, an attribute default and find_by do.
+    # 3. Boundaries into ActiveRecord unwrap Options where a value enters,
+    #    above the column type in every case: quoting and predicate building
+    #    at the SQL boundary, attribute and singular association writers on
+    #    assignment, the query attribute a bind is built from, the rows a
+    #    bulk write takes, and an attribute default where it is declared.
     # 4. SomeValidator asks whether a value is there at all, where presence
     #    asks whether it amounts to anything: Some("") passes some: true and
     #    fails presence. It lifts what it is handed, so it asks the same
@@ -505,58 +505,6 @@ module Errgonomic
 end
 
 ActiveModel::AttributeSet.prepend(Errgonomic::Rails::ActiveModelAttributeWrite)
-
-module Errgonomic
-  module Rails
-    # Values that never pass an attribute writer are cast on their way to a
-    # bind parameter instead: update_all, insert_all and upsert each cast a
-    # hash of values against the column type, as does an attribute default.
-    # The cast is the one place they all share, so a Some casts as its inner
-    # value and a None as nil.
-    #
-    module ActiveModelTypeCast
-      # @example
-      #   ActiveModel::Type::Boolean.new.cast(Some(false)) # => false
-      #   ActiveModel::Type::String.new.cast(Some('The Dark Forest')) # => 'The Dark Forest'
-      #   ActiveModel::Type::Integer.new.cast(None()) # => nil
-      #   ActiveModel::Type::Integer.new.cast(Some(3)) # => 3
-      def cast(value)
-        super(Errgonomic::Rails.unwrap_option(value))
-      end
-
-      # find_by binds its values straight into a cached statement rather than
-      # through the predicate builder, so the column type serializes what the
-      # caller passed. Most types reach here through their own serialize, and
-      # an encrypted one hands its value to the underlying type's before
-      # calling to_s on the result.
-      #
-      # @example
-      #   ActiveModel::Type::String.new.serialize(Some('The Dark Forest')) # => 'The Dark Forest'
-      #   ActiveModel::Type::String.new.serialize(None()) # => nil
-      def serialize(value)
-        super(Errgonomic::Rails.unwrap_option(value))
-      end
-    end
-
-    # Two of ActiveModel's type helpers read the value before Type::Value
-    # ever sees it: Numeric asks it for presence, which on an Option is the
-    # soft-deprecated unwrap, and Mutable serializes it, which an Option
-    # refuses. They need a module of their own, because a module already
-    # somewhere in a type's ancestors is not inserted into it a second time.
-    module ActiveModelTypeHelperCast
-      # @example
-      #   ActiveModel::Type::Integer.new.cast(Some(0)) # => 0
-      #   ActiveRecord::Type::Json.new.cast(Some({ 'a' => 1 })) # => { 'a' => 1 }
-      def cast(value)
-        super(Errgonomic::Rails.unwrap_option(value))
-      end
-    end
-  end
-end
-
-ActiveModel::Type::Value.prepend(Errgonomic::Rails::ActiveModelTypeCast)
-ActiveModel::Type::Helpers::Numeric.prepend(Errgonomic::Rails::ActiveModelTypeHelperCast)
-ActiveModel::Type::Helpers::Mutable.prepend(Errgonomic::Rails::ActiveModelTypeHelperCast)
 
 module Errgonomic
   module Rails
