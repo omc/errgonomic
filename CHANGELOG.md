@@ -1,6 +1,7 @@
 ## [Unreleased]
 
 - `ActiveRecordOptional` installs its wrapped readers into a per-class module, so a model's own reader of the same name composes with the wrapper through `super` instead of one silently replacing the other
+- A wrapped reader lifts a value exactly one layer: an Option arriving from beneath the wrapper passes through instead of being wrapped a second time
 
 ## [0.4.1] - 2025-02-20
 

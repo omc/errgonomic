@@ -217,7 +217,9 @@ module Errgonomic
               ensure
                 reads.delete(key)
               end
-              val.nil? ? Errgonomic::Option::None.new : Errgonomic::Option::Some.new(val)
+              # One layer, always: an attribute or association is never an
+              # optional of an optional, so an Option from beneath passes through.
+              val.to_option
             end
           RUBY
         end

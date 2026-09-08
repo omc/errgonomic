@@ -280,6 +280,19 @@ class Broadsheet < HouseRecord
   end
 end
 
+# A layer beneath the wrapper may hand back an Option of its own.
+module TrimmedIsbn
+  def isbn
+    super.to_option.map(&:strip)
+  end
+end
+
+class TrimmedBook < ActiveRecord::Base
+  self.table_name = 'books'
+  include TrimmedIsbn
+  include Errgonomic::Rails::ActiveRecordOptional
+end
+
 class BugTest < Minitest::Test
   def test_optional_attributes
     author = Author.create!(name: 'Cixin Liu')
@@ -658,6 +671,15 @@ class BugTest < Minitest::Test
     assert_includes AnnotatedBook.errgonomic_optionals, 'isbn'
     assert_includes AnnotatedBook.errgonomic_optionals, 'author'
     assert_includes AnnotatedAuthor.errgonomic_optionals, 'bio'
+  end
+
+  # An attribute is never an optional of an optional, so a value that
+  # arrives from beneath the wrapper already lifted passes through as it is.
+  def test_the_wrapper_lifts_a_value_exactly_one_layer
+    book = TrimmedBook.create!(title: "Death's End", isbn: '  9780765377104  ')
+
+    assert_equal '9780765377104', book.isbn.unwrap!
+    assert TrimmedBook.create!(title: 'Supernova Era').isbn.none?
   end
 
   # The wrapper and the override own different rungs of the ancestor chain,
