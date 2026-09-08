@@ -539,3 +539,24 @@ end
 ActiveModel::Type::Value.prepend(Errgonomic::Rails::ActiveModelTypeCast)
 ActiveModel::Type::Helpers::Numeric.prepend(Errgonomic::Rails::ActiveModelTypeHelperCast)
 ActiveModel::Type::Helpers::Mutable.prepend(Errgonomic::Rails::ActiveModelTypeHelperCast)
+
+module Errgonomic
+  module Rails
+    # Every bind a query builds passes through a query attribute: the
+    # predicate builder makes one per hash condition, and the statement
+    # cache behind find, find_by and exists? substitutes its values into
+    # one. Unwrapping at construction puts the Option ahead of the column
+    # type, so a type that never calls super still sees a plain value.
+    module ActiveRecordQueryAttribute
+      # @example
+      #   type = ActiveModel::Type::Integer.new
+      #   ActiveRecord::Relation::QueryAttribute.new('rank', Some(3), type).value_before_type_cast # => 3
+      #   ActiveRecord::Relation::QueryAttribute.new('rank', None(), type).value_before_type_cast # => nil
+      def initialize(name, value_before_type_cast, *rest)
+        super(name, Errgonomic::Rails.unwrap_option(value_before_type_cast), *rest)
+      end
+    end
+  end
+end
+
+ActiveRecord::Relation::QueryAttribute.prepend(Errgonomic::Rails::ActiveRecordQueryAttribute)

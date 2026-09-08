@@ -642,6 +642,16 @@ class BugTest < Minitest::Test
     assert_equal note.id, Note.find_by(meta: Some({ 'isbn' => '9780765377104' })).id
   end
 
+  # find and exists? bind through the same query attribute find_by does, so a
+  # Some has to arrive there as its inner value as well.
+  def test_find_and_exists_take_an_option_on_a_primary_key
+    genre = Genre.create!(name: 'Sci-Fi')
+    book = Book.create!(title: 'The Dark Forest', genre_id: genre.id)
+
+    assert_equal genre.id, Genre.find(book.genre_id).id
+    assert Genre.exists?(id: Some(genre.id))
+  end
+
   def test_where_with_a_none_asks_for_null
     unshelved = Book.create!(title: 'Ball Lightning')
 
