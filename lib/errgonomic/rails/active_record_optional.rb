@@ -25,8 +25,8 @@ module Errgonomic
     # 3. Boundaries into ActiveRecord unwrap Options where a value enters,
     #    above the column type in every case: quoting and predicate building
     #    at the SQL boundary, attribute and singular association writers on
-    #    assignment, the query attribute a bind is built from, the rows a
-    #    bulk write takes, and an attribute default where it is declared.
+    #    assignment, the ids and conditions find, find_by and a bulk write
+    #    are given, and an attribute default where it is declared.
     # 4. SomeValidator asks whether a value is there at all, where presence
     #    asks whether it amounts to anything: Some("") passes some: true and
     #    fails presence. It lifts what it is handed, so it asks the same
@@ -505,27 +505,6 @@ module Errgonomic
 end
 
 ActiveModel::AttributeSet.prepend(Errgonomic::Rails::ActiveModelAttributeWrite)
-
-module Errgonomic
-  module Rails
-    # Every bind a query builds passes through a query attribute: the
-    # predicate builder makes one per hash condition, and the statement
-    # cache behind find, find_by and exists? substitutes its values into
-    # one. Unwrapping at construction puts the Option ahead of the column
-    # type, so a type that never calls super still sees a plain value.
-    module ActiveRecordQueryAttribute
-      # @example
-      #   type = ActiveModel::Type::Integer.new
-      #   ActiveRecord::Relation::QueryAttribute.new('rank', Some(3), type).value_before_type_cast # => 3
-      #   ActiveRecord::Relation::QueryAttribute.new('rank', None(), type).value_before_type_cast # => nil
-      def initialize(name, value_before_type_cast, *rest)
-        super(name, Errgonomic::Rails.unwrap_option(value_before_type_cast), *rest)
-      end
-    end
-  end
-end
-
-ActiveRecord::Relation::QueryAttribute.prepend(Errgonomic::Rails::ActiveRecordQueryAttribute)
 
 module Errgonomic
   module Rails
