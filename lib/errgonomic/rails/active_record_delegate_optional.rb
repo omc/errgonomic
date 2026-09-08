@@ -4,7 +4,8 @@ module Errgonomic
   module Rails
     # Adds a `delegate_optional` class method in the spirit of Rails'
     # `delegate`, returning an Option instead of nil or NoMethodError when
-    # the delegation target is absent.
+    # the delegation target is absent. The generated reader forwards with
+    # `...` from inside a block, which Ruby 3.4, the version CI runs, accepts.
     module ActiveRecordDelegateOptional
       extend ActiveSupport::Concern
 
@@ -24,6 +25,8 @@ module Errgonomic
       # method it documents is declared rather than read.
       #
       # @!method delegate_optional(*methods, to: nil, prefix: nil, private: nil, allow_nil: nil)
+      #   @!scope class
+      #   Delegates to an optional target, answering an Option: None where the target is absent.
       #   @example prefix forms name the reader, as they do for Rails' delegate
       #     article = Article.create!(title: 'Omelas', writer: Writer.create!(name: 'Ursula', bio: 'writes'))
       #     article.writer_name # => Some('Ursula')
@@ -143,7 +146,7 @@ module Errgonomic
           methods.each do |method_name|
             reader = "#{delegate_optional_prefix(to, prefix)}#{method_name}"
             define_optional_delegation(receiver, method_name, reader, declared_at)
-            send(:private, reader) if private
+            private(reader) if private
           end
         end
 
