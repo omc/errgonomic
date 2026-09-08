@@ -456,6 +456,20 @@ module Errgonomic
     def self.unwrap_option_rows(rows)
       rows.map { |row| row.is_a?(Hash) ? unwrap_option_values(row) : row }
     end
+
+    # A declared default that is a Proc is not a value yet: ActiveModel calls
+    # it with no arguments each time a record is built. Wrap it rather than
+    # unwrap it, so what it returns meets the type where a literal default
+    # already does.
+    #
+    # @example
+    #   Errgonomic::Rails.unwrap_option_default(Some(1)) # => 1
+    #   Errgonomic::Rails.unwrap_option_default(-> { Some(1) }).call # => 1
+    def self.unwrap_option_default(default)
+      return unwrap_option(default) unless default.is_a?(Proc)
+
+      -> { unwrap_option(default.call) }
+    end
   end
 end
 
@@ -593,13 +607,13 @@ module Errgonomic
     # writer: it is held as given and cast the first time the attribute is
     # read. Unwrapping where it is declared is the only point above the type,
     # and it keeps the stored default a plain value, as an assigned one is.
-    # A Proc default is left alone: what it returns is the application's.
     module ActiveModelAttributeDefault
       # @example
       #   DefaultedNote.new.rank # => 0
       #   DefaultedNote.new.title # => nil
+      #   ProcDefaultedNote.new.title # => 'Wanderer'
       def attribute(name, type = nil, **options)
-        options[:default] = Errgonomic::Rails.unwrap_option(options[:default]) if options.key?(:default)
+        options[:default] = Errgonomic::Rails.unwrap_option_default(options[:default]) if options.key?(:default)
         super(name, type, **options)
       end
     end

@@ -454,6 +454,14 @@ class UnpricedLedger < ActiveRecord::Base
   attribute :price, MoneyType.new, default: None()
 end
 
+# A Proc default is called when the record is built, so what it returns meets
+# the column type exactly where a literal default does.
+class ProcDefaultedNote < ActiveRecord::Base
+  self.table_name = 'notes'
+  attribute :title, :string, default: -> { Some('Wanderer') }
+  attribute :body, :text, default: -> { None() }
+end
+
 # A converted model carrying one validator family per wrapped column, so
 # each is asked what it makes of a Some and of a None.
 class Manuscript < ActiveRecord::Base
@@ -1391,6 +1399,13 @@ class BugTest < Minitest::Test
   end
 
   # A default is cast on its way into a new record, without passing a writer.
+  def test_a_proc_attribute_default_may_return_an_option
+    note = ProcDefaultedNote.new
+
+    assert_equal 'Wanderer', note.title
+    assert_nil note.body
+  end
+
   def test_an_attribute_default_takes_an_option
     note = nil
     nudges = capture_stderr { note = DefaultedNote.new }

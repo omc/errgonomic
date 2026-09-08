@@ -66,3 +66,10 @@ class DefaultedNote < ActiveRecord::Base
   attribute :rank, :integer, default: Some(0)
   attribute :title, :string, default: None()
 end
+
+# A Proc default is called when the record is built, so what it returns meets
+# the column type exactly where a literal default does.
+class ProcDefaultedNote < ActiveRecord::Base
+  self.table_name = 'notes'
+  attribute :title, :string, default: -> { Some('Wanderer') }
+end
