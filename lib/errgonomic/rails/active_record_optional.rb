@@ -545,14 +545,34 @@ module Errgonomic
         super(*args.map { |arg| arg.is_a?(Hash) ? Errgonomic::Rails.unwrap_option_values(arg) : arg })
       end
 
+      # A list of ids is a list of values, so it unwraps one level in: find
+      # casts each id it was handed after the query has run, and a wrapper
+      # reaching a string primary key's type raises there.
+      #
+      # @example
+      #   first = Note.create!(title: 'Supernova Era')
+      #   second = Note.create!(title: 'Ball Lightning')
+      #   Note.find([Some(second.id), Some(first.id)]) == [second, first] # => true
       def find(*ids, &block)
-        super(*ids.map { |id| Errgonomic::Rails.unwrap_option(id) }, &block)
+        super(*ids.map { |id| Errgonomic::Rails.unwrap_options(id) }, &block)
+      end
+    end
+
+    # A relation and an association reach find without passing the class
+    # method, so the same list has to be unwrapped there as well.
+    module ActiveRecordRelationFind
+      # @example
+      #   note = Note.create!(title: 'Death\'s End')
+      #   Note.where.not(title: nil).find([Some(note.id)]) == [note] # => true
+      def find(*ids, &block)
+        super(*ids.map { |id| Errgonomic::Rails.unwrap_options(id) }, &block)
       end
     end
   end
 end
 
 ActiveRecord::Core::ClassMethods.prepend(Errgonomic::Rails::ActiveRecordFind)
+ActiveRecord::Relation.prepend(Errgonomic::Rails::ActiveRecordRelationFind)
 
 module Errgonomic
   module Rails

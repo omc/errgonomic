@@ -88,6 +88,10 @@ ActiveRecord::Schema.define do
     t.timestamps
   end
 
+  create_table 'tags', id: :string, primary_key: :slug, force: :cascade do |t|
+    t.string :label
+  end
+
   create_table 'notes', force: :cascade do |t|
     t.boolean :pinned
     t.string :title
@@ -390,6 +394,13 @@ class Note < ActiveRecord::Base
   include Errgonomic::Rails::ActiveRecordOptional
 end
 
+# A string primary key, where find casting an id it was handed raw fails
+# outright rather than coercing the wrapper down a soft-deprecated path.
+class Tag < ActiveRecord::Base
+  self.primary_key = 'slug'
+  include Errgonomic::Rails::ActiveRecordOptional
+end
+
 # A declared default is cast on its way into a new record rather than
 # assigned through a writer.
 class DefaultedNote < ActiveRecord::Base
@@ -663,6 +674,25 @@ class BugTest < Minitest::Test
 
     assert_equal genre.id, Genre.find(book.genre_id).id
     assert Genre.exists?(id: Some(genre.id))
+  end
+
+  # find given a list of ids casts each one after the query has run, so an
+  # Option in the list has to be unwrapped before it goes in. A relation and
+  # an association reach that path without passing the class method.
+  def test_find_with_a_list_of_options
+    Tag.create!(slug: 'aa', label: 'first')
+    Tag.create!(slug: 'bb', label: 'second')
+    author = Author.create!(name: 'Cixin Liu')
+    ants = Book.create!(title: 'Of Ants and Dinosaurs', author_id: author.id)
+    village = Book.create!(title: 'The Village Teacher', author_id: author.id)
+
+    nudges = capture_stderr do
+      assert_equal %w[bb aa], Tag.find([Some('bb'), Some('aa')]).map(&:slug)
+      assert_equal %w[bb aa], Tag.where.not(label: nil).find([Some('bb'), Some('aa')]).map(&:slug)
+      assert_equal [village.id, ants.id], author.books.find([Some(village.id), Some(ants.id)]).map(&:id)
+    end
+
+    assert_empty nudges
   end
 
   # An absent id is no id, so find says what it says for nil rather than
