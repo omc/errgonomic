@@ -306,6 +306,9 @@ module Errgonomic
     # Teach ActiveRecord SQL quoting to unwrap Options, quoting a None as
     # SQL NULL.
     module ActiveRecordQuoting
+      # @example
+      #   ActiveRecord::Base.connection.quote(Some(1)) # => "1"
+      #   ActiveRecord::Base.connection.quote(None()) # => "NULL"
       def quote(value)
         return super(value) unless value.is_a?(Errgonomic::Option::Any)
 
@@ -334,6 +337,12 @@ module Errgonomic
     # Take the value inside an Option at a boundary into ActiveRecord, and a
     # None as nil, reaching one level into an array so a list of Options
     # passes as a list of values.
+    #
+    # @example
+    #   Errgonomic::Rails.unwrap_options(Some(1)) # => 1
+    #   Errgonomic::Rails.unwrap_options(None()) # => nil
+    #   Errgonomic::Rails.unwrap_options([Some(1), None()]) # => [1, nil]
+    #   Errgonomic::Rails.unwrap_options(1) # => 1
     def self.unwrap_options(value)
       case value
       when Errgonomic::Option::Any
