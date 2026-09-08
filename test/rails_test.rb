@@ -82,6 +82,12 @@ ActiveRecord::Schema.define do
     t.timestamps
   end
 
+  create_table 'ledgers', force: :cascade do |t|
+    t.string :memo
+    t.integer :price
+    t.timestamps
+  end
+
   create_table 'notes', force: :cascade do |t|
     t.boolean :pinned
     t.string :title
@@ -394,6 +400,49 @@ class DefaultedNote < ActiveRecord::Base
   attribute :title, :string, default: None()
 end
 
+# An application's own type, casting and serializing a value object of its
+# own. It overrides both without calling super, which is what a type written
+# against ActiveModel::Type::Value's documented contract does, so no seam
+# prepended onto Value stands between it and the value it is handed.
+Money = Struct.new(:cents)
+
+class MoneyType < ActiveModel::Type::Value
+  def cast(value)
+    case value
+    when nil then nil
+    when Money then value
+    when Integer then Money.new(value)
+    else raise ArgumentError, "MoneyType cannot cast #{value.class}"
+    end
+  end
+
+  def serialize(value)
+    case value
+    when nil then nil
+    when Money then value.cents
+    when Integer then value
+    else raise ArgumentError, "MoneyType cannot serialize #{value.class}"
+    end
+  end
+end
+
+class Ledger < ActiveRecord::Base
+  attribute :price, MoneyType.new
+  include Errgonomic::Rails::ActiveRecordOptional
+end
+
+# A default on a custom type is cast on its way into a new record, by the
+# custom type rather than by the one the column would have had.
+class DefaultedLedger < ActiveRecord::Base
+  self.table_name = 'ledgers'
+  attribute :price, MoneyType.new, default: Some(Money.new(500))
+end
+
+class UnpricedLedger < ActiveRecord::Base
+  self.table_name = 'ledgers'
+  attribute :price, MoneyType.new, default: None()
+end
+
 # A converted model carrying one validator family per wrapped column, so
 # each is asked what it makes of a Some and of a None.
 class Manuscript < ActiveRecord::Base
@@ -582,6 +631,15 @@ class BugTest < Minitest::Test
 
     assert_equal note.id, Note.find_by(title: Some('Ball Lightning')).id
     assert_equal note.id, Note.find_by(rank: Some(987)).id
+  end
+
+  # A json column encodes the value it is given rather than handing it on, so
+  # find_by has to meet the Option before the column type does, as where
+  # already does.
+  def test_find_by_takes_an_option_on_a_json_column
+    note = Note.create!(meta: { 'isbn' => '9780765377104' })
+
+    assert_equal note.id, Note.find_by(meta: Some({ 'isbn' => '9780765377104' })).id
   end
 
   def test_where_with_a_none_asks_for_null
@@ -1281,6 +1339,46 @@ class BugTest < Minitest::Test
     assert_equal 0, note.rank
     assert_equal({ 'shelf' => 'new' }, note.meta)
     assert_nil note.title
+  end
+
+  # A custom type casts the value update_all binds, so an Option on that
+  # column has to be unwrapped before the type sees it.
+  def test_update_all_takes_an_option_on_a_custom_type
+    ledger = Ledger.create!(memo: 'opening')
+
+    Ledger.where(id: ledger.id).update_all(price: Some(Money.new(500)))
+
+    assert_equal Money.new(500), ledger.reload.price.unwrap!
+  end
+
+  def test_insert_all_takes_an_option_on_a_custom_type
+    Ledger.insert_all([{ memo: 'opening', price: Some(Money.new(500)),
+                         created_at: Time.now, updated_at: Time.now }])
+
+    assert_equal Money.new(500), Ledger.find_by!(memo: 'opening').price.unwrap!
+  end
+
+  def test_upsert_takes_an_option_on_a_custom_type
+    ledger = Ledger.create!(memo: 'opening')
+
+    Ledger.upsert({ id: ledger.id, memo: 'opening', price: Some(Money.new(500)),
+                    created_at: Time.now, updated_at: Time.now })
+
+    assert_equal Money.new(500), ledger.reload.price.unwrap!
+  end
+
+  # A default reaches the custom type's cast without passing a writer.
+  def test_an_attribute_default_on_a_custom_type_takes_an_option
+    assert_equal Money.new(500), DefaultedLedger.new.price
+    assert_nil UnpricedLedger.new.price
+  end
+
+  # find_by serializes through the custom type, which is the one boundary a
+  # Some reaches on a query rather than on a write.
+  def test_find_by_takes_an_option_on_a_custom_type
+    ledger = Ledger.create!(memo: 'opening', price: Money.new(500))
+
+    assert_equal ledger.id, Ledger.find_by(price: Some(Money.new(500))).id
   end
 
   # The predicate builder already unwraps a hash condition; unwrapping on
