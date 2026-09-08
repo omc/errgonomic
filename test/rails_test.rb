@@ -601,6 +601,7 @@ class BugTest < Minitest::Test
   def test_a_deterministic_encrypted_attribute_is_queryable
     credential = Credential.create!(access_key: 'abc123', access_token: 'tok-42')
 
+    assert_equal 'tok-42', credential.reload.access_token.unwrap!
     assert_equal credential.id, Credential.find_by(access_token: 'tok-42').id
     assert_equal credential.id, Credential.where(access_token: Some('tok-42')).first.id
     assert_nil Credential.find_by(access_token: 'tok-43')
