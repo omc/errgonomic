@@ -66,6 +66,19 @@ ActiveRecord::Schema.define do
   create_table 'credentials', force: :cascade do |t|
     t.string :access_key, limit: 255
     t.string :access_secret, limit: 255
+    t.string :access_token, limit: 255
+    t.string :handle, limit: 255
+    t.timestamps
+  end
+
+  create_table 'manuscripts', force: :cascade do |t|
+    t.string :title
+    t.string :currency
+    t.string :status
+    t.string :isbn
+    t.integer :pages
+    t.boolean :accepted
+    t.references :author
     t.timestamps
   end
 
@@ -167,11 +180,14 @@ class LoopyAuthor < ActiveRecord::Base
   include Errgonomic::Rails::ActiveRecordOptional
 end
 
-# Encryption adds a length validator that reads the raw attribute, and
-# declares itself after the concern is included, as applications write it.
+# Encryption surrounds an attribute with machinery of its own, and declares
+# itself after the concern is included, as applications write it. A
+# deterministic attribute is queryable, and downcase: normalizes it on write.
 class Credential < ActiveRecord::Base
   include Errgonomic::Rails::ActiveRecordOptional
   encrypts :access_secret
+  encrypts :access_token, deterministic: true
+  encrypts :handle, deterministic: true, downcase: true
 end
 
 # Nested attributes are assigned through the public reader, and ActiveRecord
@@ -214,6 +230,28 @@ class OptedOutBook < ActiveRecord::Base
   errgonomic_optional_except :author
   belongs_to :author, optional: true
   include Errgonomic::Rails::ActiveRecordOptional
+end
+
+# touch: and dependent: reach the associated record after a save or a
+# destroy, and a wrapped reader is what they find it through.
+class TouchingBook < ActiveRecord::Base
+  self.table_name = 'books'
+  include Errgonomic::Rails::ActiveRecordOptional
+  belongs_to :author, optional: true, touch: true
+end
+
+class DependentBook < ActiveRecord::Base
+  self.table_name = 'books'
+  include Errgonomic::Rails::ActiveRecordOptional
+  belongs_to :author, optional: true, dependent: :destroy
+end
+
+# An autosaved has_one is destroyed with its parent once it is marked, along
+# a path that reads the association's own target rather than the reader.
+class CuratedAuthor < ActiveRecord::Base
+  self.table_name = 'authors'
+  include Errgonomic::Rails::ActiveRecordOptional
+  has_one :profile, foreign_key: :author_id, autosave: true
 end
 
 # A subclass has its own schema state, so it reaches the wrapping seam a
@@ -356,6 +394,59 @@ class DefaultedNote < ActiveRecord::Base
   attribute :title, :string, default: None()
 end
 
+# A converted model carrying one validator family per wrapped column, so
+# each is asked what it makes of a Some and of a None.
+class Manuscript < ActiveRecord::Base
+  include Errgonomic::Rails::ActiveRecordOptional
+  validates :currency, inclusion: { in: %w[USD EUR] }, allow_nil: true
+  validates :status, exclusion: { in: %w[withdrawn] }, allow_nil: true
+  validates :isbn, length: { maximum: 13 }, format: { with: /\A[0-9]*\z/ }, allow_nil: true
+  validates :pages, numericality: { greater_than: 0 }, allow_nil: true
+end
+
+# Validators that weigh a value in other ways: absence asks whether it
+# amounts to nothing, acceptance matches it against a literal, comparison
+# orders it.
+class RetractedManuscript < ActiveRecord::Base
+  self.table_name = 'manuscripts'
+  include Errgonomic::Rails::ActiveRecordOptional
+  validates :status, absence: true
+  validates :accepted, acceptance: true
+  validates :pages, comparison: { greater_than: 0 }, allow_nil: true
+end
+
+# presence and some: ask different questions of the same attribute: whether
+# the value amounts to anything, and whether it is there at all.
+class SubmittedManuscript < ActiveRecord::Base
+  self.table_name = 'manuscripts'
+  include Errgonomic::Rails::ActiveRecordOptional
+  validates :title, presence: true, some: true
+end
+
+# some: is available on any model, so it has to answer for a plain value too.
+class PlainManuscript < ActiveRecord::Base
+  self.table_name = 'manuscripts'
+  validates :title, some: true
+end
+
+# A belongs_to without optional: true is required, and Rails validates it
+# with a presence validation of its own.
+class AttributedManuscript < ActiveRecord::Base
+  self.table_name = 'manuscripts'
+  self.belongs_to_required_by_default = true
+  include Errgonomic::Rails::ActiveRecordOptional
+  belongs_to :author
+end
+
+# A wrapped has_one validated for presence, the association side of the same
+# seam.
+class ProfiledAuthor < ActiveRecord::Base
+  self.table_name = 'authors'
+  include Errgonomic::Rails::ActiveRecordOptional
+  has_one :profile, foreign_key: :author_id
+  validates :profile, presence: true
+end
+
 class BugTest < Minitest::Test
   def test_optional_attributes
     author = Author.create!(name: 'Cixin Liu')
@@ -406,6 +497,16 @@ class BugTest < Minitest::Test
 
   # A None reads as absent, which for a hash condition means IS NULL rather
   # than an = NULL that can never match.
+  # find_by binds its values outside the predicate builder, so an Option
+  # reaches the column type rather than the quoting seam. A regression guard:
+  # both of these hold today, and the serialize boundary has to keep them.
+  def test_find_by_takes_an_option_on_a_string_or_integer_column
+    note = Note.create!(title: 'Ball Lightning', rank: 987)
+
+    assert_equal note.id, Note.find_by(title: Some('Ball Lightning')).id
+    assert_equal note.id, Note.find_by(rank: Some(987)).id
+  end
+
   def test_where_with_a_none_asks_for_null
     unshelved = Book.create!(title: 'Ball Lightning')
 
@@ -484,18 +585,46 @@ class BugTest < Minitest::Test
     assert_equal 'Fiction', scifi.send(:parent_name).unwrap!
   end
 
-  def test_encrypted_attributes_are_left_unwrapped
+  # An encrypted attribute is a nullable column like any other, and the
+  # ciphertext never reaches the reader.
+  def test_an_encrypted_attribute_round_trips_as_an_option
     credential = Credential.create!(access_key: 'abc123', access_secret: 'shhh')
 
-    assert_equal 'shhh', credential.access_secret
+    assert_equal 'shhh', credential.reload.access_secret.unwrap!
+
+    credential.access_secret = Some('rotated')
+    credential.save!
+
+    assert_equal 'rotated', credential.reload.access_secret.unwrap!
     assert_equal 'abc123', credential.access_key.unwrap!
   end
 
-  def test_encrypted_attributes_may_be_absent
+  def test_an_absent_encrypted_attribute_reads_as_none
     credential = Credential.create!(access_key: 'abc123')
 
-    assert_nil credential.access_secret
-    assert credential.reload.access_secret.nil?
+    assert credential.access_secret.none?
+    assert credential.reload.access_secret.none?
+  end
+
+  # A deterministic attribute encrypts to a stable ciphertext, so a query
+  # against it has to reach the same value the writer stored.
+  def test_a_deterministic_encrypted_attribute_is_queryable
+    credential = Credential.create!(access_key: 'abc123', access_token: 'tok-42')
+
+    assert_equal 'tok-42', credential.reload.access_token.unwrap!
+    assert_equal credential.id, Credential.find_by(access_token: 'tok-42').id
+    assert_equal credential.id, Credential.where(access_token: Some('tok-42')).first.id
+    assert_equal credential.id, Credential.find_by(access_token: Some('tok-42')).id
+    assert_nil Credential.find_by(access_token: 'tok-43')
+  end
+
+  # downcase: normalizes on the way in, so what was written mixed-case reads
+  # back and matches lowercase.
+  def test_a_downcased_encrypted_attribute_normalizes_on_write
+    credential = Credential.create!(access_key: 'abc123', handle: Some('MixedCase'))
+
+    assert_equal 'mixedcase', credential.reload.handle.unwrap!
+    assert_equal credential.id, Credential.find_by(handle: 'MIXEDCASE').id
   end
 
   # ActiveRecord loads a model's schema on first use, not at definition, so a
@@ -558,6 +687,36 @@ class BugTest < Minitest::Test
     assert_equal 'writes sci-fi', author.reload.profile.unwrap!.tagline
 
     author.destroy!
+
+    assert_equal 0, Profile.where(author_id: author.id).count
+  end
+
+  # touch: reads the associated record back through the public reader and
+  # asks it to touch itself.
+  def test_a_touching_belongs_to_reaches_the_record_inside_the_option
+    author = Author.create!(name: 'Cixin Liu')
+    Author.where(id: author.id).update_all(updated_at: Time.at(0))
+
+    TouchingBook.create!(title: 'The Dark Forest', author: Some(author))
+
+    assert_operator author.reload.updated_at, :>, Time.at(0)
+  end
+
+  def test_a_dependent_belongs_to_destroys_the_record_inside_the_option
+    author = Author.create!(name: 'Cixin Liu')
+    book = DependentBook.create!(title: 'The Dark Forest', author: Some(author))
+
+    book.destroy!
+
+    assert_nil Author.find_by(id: author.id)
+  end
+
+  # Marking the record a wrapped reader hands back still reaches the save.
+  def test_an_autosaved_has_one_marked_for_destruction_is_destroyed
+    author = CuratedAuthor.create!(name: 'Cixin Liu')
+    author.create_profile!(tagline: 'writes sci-fi')
+    author.profile.unwrap!.mark_for_destruction
+    author.save!
 
     assert_equal 0, Profile.where(author_id: author.id).count
   end
@@ -1080,6 +1239,138 @@ class BugTest < Minitest::Test
 
     assert_equal AnnotatedBook, AnnotatedBook.instance_method(:isbn).owner
     assert_equal Book.errgonomic_optional_readers, Book.instance_method(:isbn).owner
+  end
+
+  # A validator compares against the value, not the wrapper: an Option is
+  # never a member of the list a model spells out.
+  def test_inclusion_validates_the_value_inside_a_some
+    assert_predicate Manuscript.new(currency: Some('USD')), :valid?
+    refute_predicate Manuscript.new(currency: Some('GBP')), :valid?
+    assert_predicate Manuscript.new(currency: None()), :valid?
+  end
+
+  def test_exclusion_validates_the_value_inside_a_some
+    assert_predicate Manuscript.new(status: Some('draft')), :valid?
+    refute_predicate Manuscript.new(status: Some('withdrawn')), :valid?
+    assert_predicate Manuscript.new(status: None()), :valid?
+  end
+
+  # An empty string is absent as far as presence is concerned, and wrapping
+  # it does not make it a value.
+  def test_presence_rejects_an_empty_string_inside_a_some
+    blank = SubmittedManuscript.new(title: Some(''))
+
+    refute_predicate blank, :valid?
+    assert_equal ['can\'t be blank'], blank.errors[:title]
+
+    assert_predicate SubmittedManuscript.new(title: Some('Death\'s End')), :valid?
+    refute_predicate SubmittedManuscript.new(title: None()), :valid?
+  end
+
+  # Both validators reach the value through to_s.
+  def test_length_and_format_validate_the_value_inside_a_some
+    assert_predicate Manuscript.new(isbn: Some('9780765377104')), :valid?
+    refute_predicate Manuscript.new(isbn: Some('97807653771049')), :valid?
+    refute_predicate Manuscript.new(isbn: Some('978-0765377')), :valid?
+    assert_predicate Manuscript.new(isbn: None()), :valid?
+  end
+
+  def test_numericality_validates_the_value_inside_a_some
+    assert_predicate Manuscript.new(pages: Some(400)), :valid?
+    refute_predicate Manuscript.new(pages: Some(-1)), :valid?
+    refute_predicate Manuscript.new(pages: Some('four hundred')), :valid?
+    assert_predicate Manuscript.new(pages: None()), :valid?
+  end
+
+  # An empty string casts away to nil on an integer column, which allow_nil
+  # skips, and wrapping it changes neither step.
+  def test_numericality_gives_an_empty_string_the_same_verdict_wrapped_or_not
+    assert_equal Manuscript.new(pages: '').valid?, Manuscript.new(pages: Some('')).valid?
+  end
+
+  # An application's own validator reads through the same seam, so it is
+  # handed the value like every validator Rails ships.
+  def test_a_custom_validator_receives_the_value_inside_a_some
+    seen = []
+    audited = Class.new(ActiveRecord::Base) do
+      def self.name = 'AuditedManuscript'
+      self.table_name = 'manuscripts'
+      include Errgonomic::Rails::ActiveRecordOptional
+    end
+    audited.validates_each(:title) { |_record, _attribute, value| seen << value }
+
+    audited.new(title: Some('Death\'s End')).valid?
+    audited.new(title: None()).valid?
+
+    assert_equal ["Death's End", nil], seen
+  end
+
+  # An empty string amounts to nothing, which is what absence asks about.
+  def test_absence_weighs_the_value_inside_a_some
+    assert_predicate RetractedManuscript.new(status: Some('')), :valid?
+    refute_predicate RetractedManuscript.new(status: Some('withdrawn')), :valid?
+    assert_predicate RetractedManuscript.new(status: None()), :valid?
+  end
+
+  # Acceptance matches the value against a literal, which no wrapper equals.
+  def test_acceptance_matches_the_value_inside_a_some
+    assert_predicate RetractedManuscript.new(accepted: Some(true)), :valid?
+    refute_predicate RetractedManuscript.new(accepted: Some(false)), :valid?
+    assert_predicate RetractedManuscript.new(accepted: None()), :valid?
+  end
+
+  # Comparison orders the value against a bound, which an Option cannot be
+  # ordered against.
+  def test_comparison_orders_the_value_inside_a_some
+    assert_predicate RetractedManuscript.new(pages: Some(400)), :valid?
+    refute_predicate RetractedManuscript.new(pages: Some(-1)), :valid?
+    assert_predicate RetractedManuscript.new(pages: None()), :valid?
+  end
+
+  # The presence validation Rails adds for a required belongs_to reads the
+  # association through the same seam.
+  def test_a_required_belongs_to_reports_a_missing_record
+    author = Author.create!(name: 'Cixin Liu')
+    missing = AttributedManuscript.new(author: None())
+
+    refute_predicate missing, :valid?
+    assert_equal ['must exist'], missing.errors[:author]
+
+    assert_predicate AttributedManuscript.new(author: Some(author)), :valid?
+  end
+
+  def test_a_presence_validated_has_one_reports_a_missing_record
+    author = ProfiledAuthor.new(name: 'Cixin Liu')
+
+    refute_predicate author, :valid?
+    assert_equal ['can\'t be blank'], author.errors[:profile]
+
+    author.profile = Profile.new(tagline: 'writes sci-fi')
+
+    assert_predicate author, :valid?
+  end
+
+  # some: asks only whether the value is there, which is what separates it
+  # from presence, and it asks it of any model: a plain value is a value.
+  def test_some_asks_whether_the_value_is_there
+    blank = SubmittedManuscript.new(title: Some(''))
+    blank.valid?
+
+    refute_includes blank.errors[:title], 'is invalid'
+
+    absent = SubmittedManuscript.new(title: None())
+    absent.valid?
+
+    assert_includes absent.errors[:title], 'is invalid'
+
+    assert_predicate PlainManuscript.new(title: 'Death\'s End'), :valid?
+    refute_predicate PlainManuscript.new(title: nil), :valid?
+  end
+
+  # Every wrapped column of an unsaved record is None, and validation walks
+  # all of them.
+  def test_validating_a_converted_record_with_no_validations_does_not_raise
+    assert_predicate Note.new, :valid?
   end
 
   private

@@ -33,6 +33,14 @@ class Note < ActiveRecord::Base
   include Errgonomic::Rails::ActiveRecordOptional
 end
 
+# Two validators that answer differently for the same wrapped value.
+class Memo < ActiveRecord::Base
+  self.table_name = 'notes'
+  include Errgonomic::Rails::ActiveRecordOptional
+  validates :title, presence: true
+  validates :body, some: true
+end
+
 # yard-doctest sends any expectation that answers nil? to assert_nil, and
 # under the Rails integration None() answers it. Compare an expected Option by
 # value, so `# => None()` keeps meaning what it says.

@@ -19,20 +19,25 @@ module Errgonomic
     # 1. None#nil? answers true, so AR internals and ordinary nil checks
     #    treat an absent value as absent. Equality does not follow suit:
     #    None() == nil stays false.
-    # 2. Some delegates persisted?, marked_for_destruction?, and touch_later
-    #    to its record, so a Some can stand in for it during persistence.
+    # 2. Some delegates persisted? and touch_later to its record, so a Some
+    #    can stand in for it where ActiveRecord reads an association back
+    #    through its public reader.
     # 3. Boundaries into ActiveRecord unwrap Options: quoting and predicate
     #    building at the SQL boundary, attribute and singular association
-    #    writers on assignment, and the type cast for a value that reaches
-    #    the database without passing a writer, as update_all, insert_all,
-    #    upsert and an attribute default do.
-    # 4. SomeValidator provides a presence-style validation for Option
-    #    attributes.
-    # 5. Readers that ActiveRecord's own machinery reads raw are never
-    #    wrapped: an attribute declared with encrypts, whose length validator
-    #    sits outside Model.validators and calls to_s on the value, and a
-    #    singular association with nested attributes, which are assigned
-    #    through the reader and ask the value whether it is a new record.
+    #    writers on assignment, and the type cast and serialization for a
+    #    value that reaches the database without passing a writer, as
+    #    update_all, insert_all, upsert, an attribute default and find_by do.
+    # 4. SomeValidator asks whether a value is there at all, where presence
+    #    asks whether it amounts to anything: Some("") passes some: true and
+    #    fails presence. It lifts what it is handed, so it asks the same
+    #    question of any model, converted or not.
+    # 5. Where ActiveRecord's own machinery reads a value raw, it gets one.
+    #    Validation unwraps at read_attribute_for_validation, the seam every
+    #    EachValidator fetches an attribute through, so a standard validator
+    #    weighs the value rather than the wrapper. A singular association with
+    #    nested attributes goes further and keeps its plain reader: nested
+    #    attributes are assigned through the reader, and ActiveRecord asks
+    #    whatever it finds there whether it is a new record.
     #
     # errgonomic_optional_except is not on the list: it is configuration, an
     # escape hatch for whatever conflict shows up next, not a semantic
@@ -48,6 +53,17 @@ module Errgonomic
         reflect_on_all_associations(:has_one)
           .reject { |r| r.options[:required] }
           .each { |r| errgonomic_wrap_optional(r.name) }
+      end
+
+      # Every EachValidator fetches the attribute through here, so unwrapping
+      # once at this seam is what lets the standard validators weigh the value
+      # rather than the wrapper around it.
+      #
+      # @example presence weighs the value; some: asks only whether it is there
+      #   Memo.new(title: Some(''), body: Some('')).tap(&:valid?).errors[:title] # => ["can't be blank"]
+      #   Memo.new(title: Some(''), body: Some('')).tap(&:valid?).errors[:body] # => []
+      def read_attribute_for_validation(key)
+        Errgonomic::Rails.unwrap_option(super)
       end
 
       class_methods do
@@ -99,7 +115,6 @@ module Errgonomic
                       end
 
           inherited |
-            Array(encrypted_attributes).map(&:to_s) |
             Array(try(:errgonomic_optional_exceptions)).map(&:to_s) |
             errgonomic_nested_attribute_associations
         end
@@ -182,16 +197,6 @@ module Errgonomic
           end
         end
 
-        # Encryption surrounds an attribute with machinery that reads the raw
-        # value, including a length validator that calls to_s on it, so a
-        # wrapped encrypted attribute cannot be saved. Declaring encrypts
-        # after the include is the ordinary spelling, and the exclusion is read
-        # from ActiveRecord's own register when a reader is about to be
-        # wrapped, so this only has to take back a reader already wrapped.
-        def encrypts(*names, **options)
-          super.tap { errgonomic_unwrap_optionals(*names) }
-        end
-
         def errgonomic_unwrap_optionals(*names)
           names.map(&:to_s).each do |name|
             next unless errgonomic_optional_names.delete(name)
@@ -232,20 +237,21 @@ module Errgonomic
   end
 end
 
-# Validates that an Option attribute is Some, analogous to a presence
-# validation on a plain attribute.
+# Validates that an attribute is there at all, where presence asks whether it
+# amounts to anything: an empty string is a value, nil and None are not.
+# Lifting the value means the same question can be asked of a model the
+# concern never converted.
 class SomeValidator < ActiveModel::EachValidator
   def validate_each(record, attribute, value)
-    record.errors.add(attribute, 'is invalid') unless value.some?
+    record.errors.add(attribute, 'is invalid') unless value.to_option.some?
   end
 end
 
 module Errgonomic
   module Option
-    # Delegate ActiveRecord lifecycle checks to the wrapped record, so a Some
-    # can stand in for its record during persistence.
+    # A belongs_to declared touch: true reads the associated record back
+    # through the public reader after a save, then asks it to touch itself.
     class Some
-      delegate :marked_for_destruction?, to: :value
       delegate :persisted?, to: :value
       delegate :touch_later, to: :value
     end
@@ -432,6 +438,19 @@ module Errgonomic
       #   ActiveModel::Type::Integer.new.cast(None()) # => nil
       #   ActiveModel::Type::Integer.new.cast(Some(3)) # => 3
       def cast(value)
+        super(Errgonomic::Rails.unwrap_option(value))
+      end
+
+      # find_by binds its values straight into a cached statement rather than
+      # through the predicate builder, so the column type serializes what the
+      # caller passed. Most types reach here through their own serialize, and
+      # an encrypted one hands its value to the underlying type's before
+      # calling to_s on the result.
+      #
+      # @example
+      #   ActiveModel::Type::String.new.serialize(Some('The Dark Forest')) # => 'The Dark Forest'
+      #   ActiveModel::Type::String.new.serialize(None()) # => nil
+      def serialize(value)
         super(Errgonomic::Rails.unwrap_option(value))
       end
     end
