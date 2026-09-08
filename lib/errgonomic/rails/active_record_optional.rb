@@ -639,3 +639,24 @@ module Errgonomic
 end
 
 ActiveRecord::Relation.prepend(Errgonomic::Rails::ActiveRecordBulkWrite)
+
+module Errgonomic
+  module Rails
+    # A declared default reaches the record's attribute without passing a
+    # writer: it is held as given and cast the first time the attribute is
+    # read. Unwrapping where it is declared is the only point above the type,
+    # and it keeps the stored default a plain value, as an assigned one is.
+    # A Proc default is left alone: what it returns is the application's.
+    module ActiveModelAttributeDefault
+      # @example
+      #   DefaultedNote.new.rank # => 0
+      #   DefaultedNote.new.title # => nil
+      def attribute(name, type = nil, **options)
+        options[:default] = Errgonomic::Rails.unwrap_option(options[:default]) if options.key?(:default)
+        super(name, type, **options)
+      end
+    end
+  end
+end
+
+ActiveModel::AttributeRegistration::ClassMethods.prepend(Errgonomic::Rails::ActiveModelAttributeDefault)
