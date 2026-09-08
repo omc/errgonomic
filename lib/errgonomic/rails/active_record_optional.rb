@@ -448,6 +448,14 @@ module Errgonomic
     def self.unwrap_option_values(hash)
       hash.transform_values { |value| unwrap_option(value) }
     end
+
+    # Unwrap each value of each row, where the boundary takes a list of rows.
+    #
+    # @example
+    #   Errgonomic::Rails.unwrap_option_rows([{ title: Some('x') }]) # => [{ title: 'x' }]
+    def self.unwrap_option_rows(rows)
+      rows.map { |row| row.is_a?(Hash) ? unwrap_option_values(row) : row }
+    end
   end
 end
 
@@ -597,3 +605,37 @@ module Errgonomic
 end
 
 ActiveRecord::Core::ClassMethods.prepend(Errgonomic::Rails::ActiveRecordFind)
+
+module Errgonomic
+  module Rails
+    # A bulk write never passes an attribute writer: it casts and serializes
+    # each value it was handed straight into the statement. Unwrapping the
+    # row on the way in is what lets a Some cross that boundary whatever the
+    # column type is. insert, insert! and upsert route through their plural
+    # forms, so they are covered here too. A nested structure inside a value
+    # is the caller's own and is left as it is.
+    module ActiveRecordBulkWrite
+      # @example
+      #   Note.insert_all([{ title: Some('Wanderer'), rank: None() }])
+      #   Note.where(title: 'Wanderer').update_all(rank: Some(3))
+      #   Note.find_by(title: 'Wanderer').rank # => Some(3)
+      def update_all(updates)
+        super(updates.is_a?(Hash) ? Errgonomic::Rails.unwrap_option_values(updates) : updates)
+      end
+
+      def insert_all(attributes, **kwargs)
+        super(Errgonomic::Rails.unwrap_option_rows(attributes), **kwargs)
+      end
+
+      def insert_all!(attributes, **kwargs)
+        super(Errgonomic::Rails.unwrap_option_rows(attributes), **kwargs)
+      end
+
+      def upsert_all(attributes, **kwargs)
+        super(Errgonomic::Rails.unwrap_option_rows(attributes), **kwargs)
+      end
+    end
+  end
+end
+
+ActiveRecord::Relation.prepend(Errgonomic::Rails::ActiveRecordBulkWrite)
