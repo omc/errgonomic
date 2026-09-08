@@ -1383,10 +1383,10 @@ class BugTest < Minitest::Test
   end
 
   def test_insert_all_takes_an_option_on_a_custom_type
-    Ledger.insert_all([{ memo: 'opening', price: Some(Money.new(500)),
+    Ledger.insert_all([{ memo: 'inserted', price: Some(Money.new(500)),
                          created_at: Time.now, updated_at: Time.now }])
 
-    assert_equal Money.new(500), Ledger.find_by!(memo: 'opening').price.unwrap!
+    assert_equal Money.new(500), Ledger.find_by!(memo: 'inserted').price.unwrap!
   end
 
   def test_upsert_takes_an_option_on_a_custom_type
@@ -1407,9 +1407,9 @@ class BugTest < Minitest::Test
   # find_by serializes through the custom type, which is the one boundary a
   # Some reaches on a query rather than on a write.
   def test_find_by_takes_an_option_on_a_custom_type
-    ledger = Ledger.create!(memo: 'opening', price: Money.new(500))
+    ledger = Ledger.create!(memo: 'closing', price: Money.new(1200))
 
-    assert_equal ledger.id, Ledger.find_by(price: Some(Money.new(500))).id
+    assert_equal ledger.id, Ledger.find_by(price: Some(Money.new(1200))).id
   end
 
   # The predicate builder already unwraps a hash condition; unwrapping on
