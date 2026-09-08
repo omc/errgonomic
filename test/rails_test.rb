@@ -685,6 +685,10 @@ class BugTest < Minitest::Test
   # The wrapper and the override own different rungs of the ancestor chain,
   # which is what lets super reach one from the other.
   def test_a_wrapper_and_an_override_own_different_rungs
+    # A column reader exists once the schema has loaded, and asking which
+    # readers were wrapped is what loads it.
+    Book.errgonomic_optionals
+
     assert_equal AnnotatedBook, AnnotatedBook.instance_method(:isbn).owner
     assert_equal Book.errgonomic_optional_readers, Book.instance_method(:isbn).owner
   end
