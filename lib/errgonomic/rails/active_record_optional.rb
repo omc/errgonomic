@@ -22,8 +22,10 @@ module Errgonomic
     # 2. Some delegates persisted?, marked_for_destruction?, and touch_later
     #    to its record, so a Some can stand in for it during persistence.
     # 3. Boundaries into ActiveRecord unwrap Options: quoting and predicate
-    #    building at the SQL boundary, and singular association writers on
-    #    assignment.
+    #    building at the SQL boundary, attribute and singular association
+    #    writers on assignment, and the type cast for a value that reaches
+    #    the database without passing a writer, as update_all, insert_all,
+    #    upsert and an attribute default do.
     # 4. SomeValidator provides a presence-style validation for Option
     #    attributes.
     # 5. Readers that ActiveRecord's own machinery reads raw are never
@@ -306,6 +308,9 @@ module Errgonomic
     # Teach ActiveRecord SQL quoting to unwrap Options, quoting a None as
     # SQL NULL.
     module ActiveRecordQuoting
+      # @example
+      #   ActiveRecord::Base.connection.quote(Some(1)) # => "1"
+      #   ActiveRecord::Base.connection.quote(None()) # => "NULL"
       def quote(value)
         return super(value) unless value.is_a?(Errgonomic::Option::Any)
 
@@ -334,6 +339,12 @@ module Errgonomic
     # Take the value inside an Option at a boundary into ActiveRecord, and a
     # None as nil, reaching one level into an array so a list of Options
     # passes as a list of values.
+    #
+    # @example
+    #   Errgonomic::Rails.unwrap_options(Some(1)) # => 1
+    #   Errgonomic::Rails.unwrap_options(None()) # => nil
+    #   Errgonomic::Rails.unwrap_options([Some(1), None()]) # => [1, nil]
+    #   Errgonomic::Rails.unwrap_options(1) # => 1
     def self.unwrap_options(value)
       case value
       when Errgonomic::Option::Any
@@ -343,6 +354,18 @@ module Errgonomic
       else
         value
       end
+    end
+
+    # Take the value inside an Option, and a None as nil, where the boundary
+    # takes one value: an attribute is a single typed field, so a collection
+    # that happens to hold an Option is that collection.
+    #
+    # @example
+    #   Errgonomic::Rails.unwrap_option(Some(1)) # => 1
+    #   Errgonomic::Rails.unwrap_option(None()) # => nil
+    #   Errgonomic::Rails.unwrap_option([Some(1)]) # => [Some(1)]
+    def self.unwrap_option(value)
+      value.is_a?(Errgonomic::Option::Any) ? value.unwrap_or(nil) : value
     end
   end
 end
@@ -364,3 +387,71 @@ module Errgonomic
 end
 
 ActiveRecord::Associations::SingularAssociation.prepend(Errgonomic::Rails::ActiveRecordSingularAssociationWriter)
+
+module Errgonomic
+  module Rails
+    # An attribute writer hands its value to a type cast that has never heard
+    # of an Option, and each type fails its own way: a Some is truthy and not
+    # one of ActiveModel's FALSE_VALUES, so a wrapped false cast to true.
+    # Unwrap before the attribute is built rather than inside the cast, so the
+    # value assigned, dirty tracking and the before-type-cast reader all agree
+    # on what was assigned. Every writer passes here, as do new,
+    # assign_attributes and update.
+    module ActiveModelAttributeWrite
+      # @example
+      #   Note.new(pinned: Some(false)).pinned # => Some(false)
+      #   Note.new(pinned: None()).pinned # => None()
+      #   Note.new(title: Some('The Dark Forest')).title # => Some('The Dark Forest')
+      #   Note.new(rank: Some(3)).rank # => Some(3)
+      #   Note.new(due_on: Some(Date.new(2026, 7, 31))).due_on # => Some(Date.new(2026, 7, 31))
+      #
+      # @example A wrapper never reaches the attribute behind the reader
+      #   Note.new(pinned: Some(false)).attributes['pinned'] # => false
+      #   Note.new(pinned: Some(false)).read_attribute_before_type_cast('pinned') # => false
+      def write_from_user(name, value)
+        super(name, Errgonomic::Rails.unwrap_option(value))
+      end
+    end
+  end
+end
+
+ActiveModel::AttributeSet.prepend(Errgonomic::Rails::ActiveModelAttributeWrite)
+
+module Errgonomic
+  module Rails
+    # Values that never pass an attribute writer are cast on their way to a
+    # bind parameter instead: update_all, insert_all and upsert each cast a
+    # hash of values against the column type, as does an attribute default.
+    # The cast is the one place they all share, so a Some casts as its inner
+    # value and a None as nil.
+    #
+    module ActiveModelTypeCast
+      # @example
+      #   ActiveModel::Type::Boolean.new.cast(Some(false)) # => false
+      #   ActiveModel::Type::String.new.cast(Some('The Dark Forest')) # => 'The Dark Forest'
+      #   ActiveModel::Type::Integer.new.cast(None()) # => nil
+      #   ActiveModel::Type::Integer.new.cast(Some(3)) # => 3
+      def cast(value)
+        super(Errgonomic::Rails.unwrap_option(value))
+      end
+    end
+
+    # Two of ActiveModel's type helpers read the value before Type::Value
+    # ever sees it: Numeric asks it for presence, which on an Option is the
+    # soft-deprecated unwrap, and Mutable serializes it, which an Option
+    # refuses. They need a module of their own, because a module already
+    # somewhere in a type's ancestors is not inserted into it a second time.
+    module ActiveModelTypeHelperCast
+      # @example
+      #   ActiveModel::Type::Integer.new.cast(Some(0)) # => 0
+      #   ActiveRecord::Type::Json.new.cast(Some({ 'a' => 1 })) # => { 'a' => 1 }
+      def cast(value)
+        super(Errgonomic::Rails.unwrap_option(value))
+      end
+    end
+  end
+end
+
+ActiveModel::Type::Value.prepend(Errgonomic::Rails::ActiveModelTypeCast)
+ActiveModel::Type::Helpers::Numeric.prepend(Errgonomic::Rails::ActiveModelTypeHelperCast)
+ActiveModel::Type::Helpers::Mutable.prepend(Errgonomic::Rails::ActiveModelTypeHelperCast)

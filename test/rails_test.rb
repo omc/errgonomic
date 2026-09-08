@@ -3,6 +3,7 @@
 require 'active_record'
 require 'minitest/autorun'
 require 'logger'
+require 'stringio'
 
 require_relative '../lib/errgonomic/rails'
 
@@ -65,6 +66,19 @@ ActiveRecord::Schema.define do
   create_table 'credentials', force: :cascade do |t|
     t.string :access_key, limit: 255
     t.string :access_secret, limit: 255
+    t.timestamps
+  end
+
+  create_table 'notes', force: :cascade do |t|
+    t.boolean :pinned
+    t.string :title
+    t.text :body
+    t.json :meta
+    t.integer :rank
+    t.float :score
+    t.decimal :price
+    t.date :due_on
+    t.datetime :read_at
     t.timestamps
   end
 end
@@ -324,6 +338,22 @@ class TrimmedBook < ActiveRecord::Base
   self.table_name = 'books'
   include TrimmedIsbn
   include Errgonomic::Rails::ActiveRecordOptional
+end
+
+# One nullable column per type an attribute writer has to cast, so what an
+# Option stores can be compared against what its inner value stores.
+class Note < ActiveRecord::Base
+  include Errgonomic::Rails::ActiveRecordOptional
+end
+
+# A declared default is cast on its way into a new record rather than
+# assigned through a writer.
+class DefaultedNote < ActiveRecord::Base
+  self.table_name = 'notes'
+  attribute :pinned, :boolean, default: Some(false)
+  attribute :rank, :integer, default: Some(0)
+  attribute :meta, :json, default: Some({ 'shelf' => 'new' })
+  attribute :title, :string, default: None()
 end
 
 class BugTest < Minitest::Test
@@ -645,6 +675,219 @@ class BugTest < Minitest::Test
     assert_equal author, other_book.reload.author.unwrap!
   end
 
+  # An Option assigned through an attribute writer stores what its inner
+  # value stores. Boolean is the type with the sharpest edge: a Some is
+  # truthy and is not one of ActiveModel's FALSE_VALUES, so a cast that saw
+  # the wrapper would read a wrapped false as true.
+  def test_a_boolean_writer_takes_an_option
+    note = Note.create!(pinned: Some(false))
+
+    assert_equal false, note.reload.pinned.unwrap!
+
+    note.update!(pinned: Some(true))
+
+    assert_equal true, note.reload.pinned.unwrap!
+
+    note.update!(pinned: None())
+
+    assert note.reload.pinned.none?
+  end
+
+  def test_a_string_writer_takes_an_option
+    note = Note.create!(title: Some('The Dark Forest'), body: Some('a novel'))
+
+    assert_equal 'The Dark Forest', note.reload.title.unwrap!
+    assert_equal 'a novel', note.body.unwrap!
+
+    note.update!(title: Some(''), body: None())
+
+    assert_equal '', note.reload.title.unwrap!
+    assert note.body.none?
+  end
+
+  def test_a_json_writer_takes_an_option
+    note = Note.create!(meta: Some({ 'isbn' => '9780765377104' }))
+
+    assert_equal({ 'isbn' => '9780765377104' }, note.reload.meta.unwrap!)
+
+    note.update!(meta: None())
+
+    assert note.reload.meta.none?
+  end
+
+  # A numeric writer reaches its value without Option#presence, which is
+  # soft-deprecated and nudges on stderr on every call.
+  def test_a_numeric_writer_takes_an_option_without_a_deprecation_nudge
+    note = nil
+    nudges = capture_stderr do
+      note = Note.create!(rank: Some(0), score: Some(0.0), price: Some(0))
+    end
+
+    assert_equal '', nudges
+    assert_equal 0, note.reload.rank.unwrap!
+    assert_in_delta 0.0, note.score.unwrap!
+    assert_equal 0, note.price.unwrap!
+
+    note.update!(rank: Some(3), score: Some(1.5), price: Some(2.25))
+
+    assert_equal 3, note.reload.rank.unwrap!
+    assert_in_delta 1.5, note.score.unwrap!
+    assert_equal BigDecimal('2.25'), note.price.unwrap!
+
+    note.update!(rank: None(), score: None(), price: None())
+
+    assert note.reload.rank.none?
+    assert note.score.none?
+    assert note.price.none?
+  end
+
+  # A date cast hands an object it does not recognize back unchanged, so the
+  # attribute behind the reader is where a surviving wrapper would show.
+  def test_a_date_writer_takes_an_option
+    due_on = Date.new(2026, 7, 31)
+    read_at = Time.utc(2026, 7, 31, 12, 0, 0)
+    note = Note.create!(due_on: Some(due_on), read_at: Some(read_at))
+
+    assert_equal due_on, note.attributes['due_on']
+    assert_equal read_at, note.attributes['read_at']
+    assert_equal due_on, note.reload.due_on.unwrap!
+    assert_equal read_at, note.read_at.unwrap!
+
+    note.update!(due_on: None(), read_at: None())
+
+    assert note.reload.due_on.none?
+    assert note.read_at.none?
+  end
+
+  # Dirty tracking, the before-type-cast reader and attributes read the
+  # attribute rather than the reader, so an Option must not survive as far as
+  # the attribute.
+  def test_an_option_assignment_leaves_raw_values_behind_the_reader
+    note = Note.create!
+    note.title = Some("Death's End")
+    note.pinned = Some(false)
+
+    assert_equal [nil, "Death's End"], note.changes['title']
+    assert_equal [nil, false], note.changes['pinned']
+    assert_equal "Death's End", note.read_attribute_before_type_cast('title')
+    assert_equal false, note.read_attribute_before_type_cast('pinned')
+    assert_equal "Death's End", note.attributes['title']
+
+    note.save!
+
+    assert_equal [nil, "Death's End"], note.saved_changes['title']
+  end
+
+  # A wrapped reader hands its value straight to another record's writer,
+  # which is the copy idiom a conversion leans on.
+  def test_an_attribute_copied_from_a_wrapped_reader_round_trips
+    note = Note.create!(title: 'The Dark Forest', body: 'a novel', rank: 3, due_on: Date.new(2026, 7, 31))
+    other = Note.create!
+
+    other.title = note.title
+    other.rank = note.rank
+    other.due_on = note.due_on
+    other.assign_attributes(body: note.body)
+    other.save!
+
+    assert_equal 'The Dark Forest', other.reload.title.unwrap!
+    assert_equal 'a novel', other.body.unwrap!
+    assert_equal 3, other.rank.unwrap!
+    assert_equal Date.new(2026, 7, 31), other.due_on.unwrap!
+  end
+
+  # update_all writes through the bind path rather than an attribute writer.
+  def test_update_all_takes_an_option
+    note = Note.create!(title: 'Supernova Era')
+
+    nudges = capture_stderr do
+      Note.where(id: note.id).update_all(
+        title: Some("Death's End"), pinned: Some(false), meta: Some({ 'isbn' => '9780765377104' }),
+        rank: Some(0), score: Some(1.5), price: Some(2.25)
+      )
+    end
+
+    assert_equal '', nudges
+    assert_equal "Death's End", note.reload.title.unwrap!
+    assert_equal false, note.pinned.unwrap!
+    assert_equal({ 'isbn' => '9780765377104' }, note.meta.unwrap!)
+    assert_equal 0, note.rank.unwrap!
+    assert_in_delta 1.5, note.score.unwrap!
+    assert_equal BigDecimal('2.25'), note.price.unwrap!
+
+    Note.where(id: note.id).update_all(title: None(), rank: None(), meta: None())
+
+    assert note.reload.title.none?
+    assert note.rank.none?
+    assert note.meta.none?
+  end
+
+  def test_insert_all_takes_an_option
+    nudges = capture_stderr do
+      Note.insert_all([{ title: Some('Supernova Era'), pinned: Some(false), meta: Some(%w[a b]),
+                         rank: Some(3), score: Some(1.5), price: Some(2.25),
+                         created_at: Time.now, updated_at: Time.now }])
+    end
+    note = Note.order(:id).last
+
+    assert_equal '', nudges
+    assert_equal 'Supernova Era', note.title.unwrap!
+    assert_equal false, note.pinned.unwrap!
+    assert_equal %w[a b], note.meta.unwrap!
+    assert_equal 3, note.rank.unwrap!
+    assert_in_delta 1.5, note.score.unwrap!
+    assert_equal BigDecimal('2.25'), note.price.unwrap!
+  end
+
+  def test_upsert_takes_an_option
+    note = Note.create!(title: 'Supernova Era')
+
+    nudges = capture_stderr do
+      Note.upsert({ id: note.id, title: Some("Death's End"), meta: Some({ 'isbn' => '978' }),
+                    rank: Some(0), score: Some(1.5), price: Some(2.25),
+                    created_at: Time.now, updated_at: Time.now })
+    end
+
+    assert_equal '', nudges
+    assert_equal "Death's End", note.reload.title.unwrap!
+    assert_equal({ 'isbn' => '978' }, note.meta.unwrap!)
+    assert_equal 0, note.rank.unwrap!
+    assert_in_delta 1.5, note.score.unwrap!
+    assert_equal BigDecimal('2.25'), note.price.unwrap!
+  end
+
+  # An attribute takes one value, and an Option of one is that value. An
+  # Option inside a collection is a different shape, and stays where it is.
+  def test_only_a_top_level_option_is_unwrapped_on_assignment
+    note = Note.create!(meta: Some([1, 2]))
+
+    assert_equal [1, 2], note.reload.meta.unwrap!
+
+    assert_raises(Errgonomic::SerializeError) { note.update!(meta: [Some(1), 2]) }
+  end
+
+  # A default is cast on its way into a new record, without passing a writer.
+  def test_an_attribute_default_takes_an_option
+    note = nil
+    nudges = capture_stderr { note = DefaultedNote.new }
+
+    assert_equal '', nudges
+    assert_equal false, note.pinned
+    assert_equal 0, note.rank
+    assert_equal({ 'shelf' => 'new' }, note.meta)
+    assert_nil note.title
+  end
+
+  # The predicate builder already unwraps a hash condition; unwrapping on
+  # assignment must leave that alone.
+  def test_where_still_matches_an_option_condition
+    note = Note.create!(title: 'Supernova Era', pinned: false)
+
+    assert_equal [note], Note.where(id: note.id, pinned: Some(false)).to_a
+    assert_empty Note.where(id: note.id, pinned: Some(true))
+    assert_equal [note], Note.where(id: note.id, read_at: None()).to_a
+  end
+
   # ActiveRecord reads the association, asks it whether it is a new record,
   # and assigns through it, so the reader has to stay plain for the whole
   # nested-attributes cycle: build, update, and destroy.
@@ -840,6 +1083,15 @@ class BugTest < Minitest::Test
   end
 
   private
+
+  def capture_stderr
+    original = $stderr
+    $stderr = StringIO.new
+    yield
+    $stderr.string
+  ensure
+    $stderr = original
+  end
 
   def deeper(frames, &block)
     return block.call if frames.zero?
