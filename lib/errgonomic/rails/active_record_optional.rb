@@ -331,23 +331,6 @@ module Errgonomic
   end
 end
 
-# Teach ActiveRecord type casting to unwrap Options: a Some casts as its
-# inner value, a None casts as nil.
-module ActiveRecordOptionShim
-  def type_cast(value)
-    case value
-    when Errgonomic::Option::Some
-      super(value.unwrap!)
-    when Errgonomic::Option::None
-      super(nil)
-    else
-      super
-    end
-  end
-end
-
-ActiveRecord::ConnectionAdapters::Quoting.prepend(ActiveRecordOptionShim)
-
 # Lift nil into None.
 class NilClass
   def to_option
