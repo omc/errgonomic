@@ -33,11 +33,10 @@ module Errgonomic
     # 5. Where ActiveRecord's own machinery reads a value raw, it gets one.
     #    Validation unwraps at read_attribute_for_validation, the seam every
     #    EachValidator fetches an attribute through, so a standard validator
-    #    weighs the value rather than the wrapper. Two readers are not wrapped
-    #    at all: an attribute declared with encrypts, whose length validator
-    #    sits outside Model.validators and calls to_s on the value, and a
-    #    singular association with nested attributes, which are assigned
-    #    through the reader and ask the value whether it is a new record.
+    #    weighs the value rather than the wrapper. A singular association with
+    #    nested attributes goes further and keeps its plain reader: nested
+    #    attributes are assigned through the reader, and ActiveRecord asks
+    #    whatever it finds there whether it is a new record.
     #
     # errgonomic_optional_except is not on the list: it is configuration, an
     # escape hatch for whatever conflict shows up next, not a semantic
@@ -115,7 +114,6 @@ module Errgonomic
                       end
 
           inherited |
-            Array(encrypted_attributes).map(&:to_s) |
             Array(try(:errgonomic_optional_exceptions)).map(&:to_s) |
             errgonomic_nested_attribute_associations
         end
@@ -196,16 +194,6 @@ module Errgonomic
           nested_attributes_options.keys.map(&:to_s).select do |name|
             %i[has_one belongs_to].include?(reflect_on_association(name)&.macro)
           end
-        end
-
-        # Encryption surrounds an attribute with machinery that reads the raw
-        # value, including a length validator that calls to_s on it, so a
-        # wrapped encrypted attribute cannot be saved. Declaring encrypts
-        # after the include is the ordinary spelling, and the exclusion is read
-        # from ActiveRecord's own register when a reader is about to be
-        # wrapped, so this only has to take back a reader already wrapped.
-        def encrypts(*names, **options)
-          super.tap { errgonomic_unwrap_optionals(*names) }
         end
 
         def errgonomic_unwrap_optionals(*names)

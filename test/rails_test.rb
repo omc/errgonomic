@@ -66,6 +66,8 @@ ActiveRecord::Schema.define do
   create_table 'credentials', force: :cascade do |t|
     t.string :access_key, limit: 255
     t.string :access_secret, limit: 255
+    t.string :access_token, limit: 255
+    t.string :handle, limit: 255
     t.timestamps
   end
 
@@ -178,11 +180,14 @@ class LoopyAuthor < ActiveRecord::Base
   include Errgonomic::Rails::ActiveRecordOptional
 end
 
-# Encryption adds a length validator that reads the raw attribute, and
-# declares itself after the concern is included, as applications write it.
+# Encryption surrounds an attribute with machinery of its own, and declares
+# itself after the concern is included, as applications write it. A
+# deterministic attribute is queryable, and downcase: normalizes it on write.
 class Credential < ActiveRecord::Base
   include Errgonomic::Rails::ActiveRecordOptional
   encrypts :access_secret
+  encrypts :access_token, deterministic: true
+  encrypts :handle, deterministic: true, downcase: true
 end
 
 # Nested attributes are assigned through the public reader, and ActiveRecord
@@ -548,18 +553,44 @@ class BugTest < Minitest::Test
     assert_equal 'Fiction', scifi.send(:parent_name).unwrap!
   end
 
-  def test_encrypted_attributes_are_left_unwrapped
+  # An encrypted attribute is a nullable column like any other, and the
+  # ciphertext never reaches the reader.
+  def test_an_encrypted_attribute_round_trips_as_an_option
     credential = Credential.create!(access_key: 'abc123', access_secret: 'shhh')
 
-    assert_equal 'shhh', credential.access_secret
+    assert_equal 'shhh', credential.reload.access_secret.unwrap!
+
+    credential.access_secret = Some('rotated')
+    credential.save!
+
+    assert_equal 'rotated', credential.reload.access_secret.unwrap!
     assert_equal 'abc123', credential.access_key.unwrap!
   end
 
-  def test_encrypted_attributes_may_be_absent
+  def test_an_absent_encrypted_attribute_reads_as_none
     credential = Credential.create!(access_key: 'abc123')
 
-    assert_nil credential.access_secret
-    assert credential.reload.access_secret.nil?
+    assert credential.access_secret.none?
+    assert credential.reload.access_secret.none?
+  end
+
+  # A deterministic attribute encrypts to a stable ciphertext, so a query
+  # against it has to reach the same value the writer stored.
+  def test_a_deterministic_encrypted_attribute_is_queryable
+    credential = Credential.create!(access_key: 'abc123', access_token: 'tok-42')
+
+    assert_equal credential.id, Credential.find_by(access_token: 'tok-42').id
+    assert_equal credential.id, Credential.where(access_token: Some('tok-42')).first.id
+    assert_nil Credential.find_by(access_token: 'tok-43')
+  end
+
+  # downcase: normalizes on the way in, so what was written mixed-case reads
+  # back and matches lowercase.
+  def test_a_downcased_encrypted_attribute_normalizes_on_write
+    credential = Credential.create!(access_key: 'abc123', handle: Some('MixedCase'))
+
+    assert_equal 'mixedcase', credential.reload.handle.unwrap!
+    assert_equal credential.id, Credential.find_by(handle: 'MIXEDCASE').id
   end
 
   # ActiveRecord loads a model's schema on first use, not at definition, so a

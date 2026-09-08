@@ -211,14 +211,14 @@ end
 
 When `Rails::Railtie` is defined, Errgonomic installs a Railtie with two opt-in integrations for ActiveRecord:
 
-- `include Errgonomic::Rails::ActiveRecordOptional` in a model makes its nullable attributes and `optional: true` associations return `Some(value)` or `None()` instead of a value-or-nil. Every nullable column and optional association is wrapped, with no per-attribute opt-in. Four kinds of reader stay unwrapped: attributes declared with `encrypts` and singular associations with `accepts_nested_attributes_for`, both of which ActiveRecord's own machinery reads raw; a `has_one ..., required: true`, whose absence is a validation failure rather than a value; and anything named by `errgonomic_optional_except`.
+- `include Errgonomic::Rails::ActiveRecordOptional` in a model makes its nullable attributes and `optional: true` associations return `Some(value)` or `None()` instead of a value-or-nil. Every nullable column and optional association is wrapped, with no per-attribute opt-in. Three kinds of reader stay unwrapped: a singular association with `accepts_nested_attributes_for`, which ActiveRecord assigns through the reader and reads raw; a `has_one ..., required: true`, whose absence is a validation failure rather than a value; and anything named by `errgonomic_optional_except`.
 
 ```ruby
 class Credential < ApplicationRecord
   errgonomic_optional_except :legacy_token
   include Errgonomic::Rails::ActiveRecordOptional
 
-  encrypts :access_secret   # also left unwrapped, declared either side of the include
+  encrypts :access_secret   # wrapped like any other nullable column
   has_one :rotation_schedule # wrapped: Some(schedule) or None()
   has_one :owner, required: true # left unwrapped: absence is a validation failure
 end
@@ -305,7 +305,7 @@ This is the register of where the gem leaves the Rust idiom, and why. ActiveReco
 2. `Some` delegates `persisted?`, `marked_for_destruction?`, and `touch_later` to its record, so a `Some` can stand in for its record during persistence.
 3. Quoting and the predicate builder are patched so an `Option` passed into `where`/`quote` is unwrapped at the SQL boundary: `Some(v)` binds exactly as `v`, and `None()` as `nil`, so a hash condition asks for `IS NULL`. An array of Options unwraps too. An Option interpolated into raw SQL (`where("id = ?", opt)`) still raises, as it should. Assignment unwraps on the same principle. A singular association writer takes an Option of a record: `book.author = Some(author)` assigns it and `book.author = None()` clears the association, while a `Some` of the wrong class still raises `AssociationTypeMismatch`. An attribute writer takes an Option of a value, for every column type, and unwraps before the attribute is built, so `book.isbn = other.isbn` round-trips and nothing behind the reader ever holds a wrapper. The type cast unwraps on the same terms for a value that reaches the database without passing a writer: `update_all`, `insert_all`, `upsert`, and a default declared with `attribute :isbn, :string, default: Some('unassigned')`.
 4. `SomeValidator` asks whether a value is there at all, where `presence` asks whether it amounts to anything: `Some('')` passes `validates :x, some: true` and fails `presence: true`. It lifts what it is handed, so it asks the same question of any model, converted or not.
-5. Where ActiveRecord's own machinery reads a value raw, it gets one. Validation unwraps at `read_attribute_for_validation`, the seam every `EachValidator` fetches an attribute through, so a standard validator weighs the value rather than the wrapper. Two readers are not wrapped at all: an attribute declared with `encrypts`, whose length validator sits outside `Model.validators` and calls `to_s` on the value, and a singular association with `accepts_nested_attributes_for`, which is assigned through the reader and asks the value whether it is a new record.
+5. Where ActiveRecord's own machinery reads a value raw, it gets one. Validation unwraps at `read_attribute_for_validation`, the seam every `EachValidator` fetches an attribute through, so a standard validator weighs the value rather than the wrapper. A singular association with `accepts_nested_attributes_for` goes further and keeps its plain reader: nested attributes are assigned through the reader, and ActiveRecord asks whatever it finds there whether it is a new record.
 
 The set is closed. If a future integration appears to need a sixth compromise, that is a signal ActiveRecord is pushing back somewhere unmapped, and it warrants a design discussion rather than a quiet patch. `errgonomic_optional_except` is deliberately not on the list: it is configuration, an escape hatch that softens the all-or-nothing include for whatever conflict shows up next, rather than a semantic exception.
 
