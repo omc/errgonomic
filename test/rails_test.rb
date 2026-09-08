@@ -232,6 +232,28 @@ class OptedOutBook < ActiveRecord::Base
   include Errgonomic::Rails::ActiveRecordOptional
 end
 
+# touch: and dependent: reach the associated record after a save or a
+# destroy, and a wrapped reader is what they find it through.
+class TouchingBook < ActiveRecord::Base
+  self.table_name = 'books'
+  include Errgonomic::Rails::ActiveRecordOptional
+  belongs_to :author, optional: true, touch: true
+end
+
+class DependentBook < ActiveRecord::Base
+  self.table_name = 'books'
+  include Errgonomic::Rails::ActiveRecordOptional
+  belongs_to :author, optional: true, dependent: :destroy
+end
+
+# An autosaved has_one is destroyed with its parent once it is marked, along
+# a path that reads the association's own target rather than the reader.
+class CuratedAuthor < ActiveRecord::Base
+  self.table_name = 'authors'
+  include Errgonomic::Rails::ActiveRecordOptional
+  has_one :profile, foreign_key: :author_id, autosave: true
+end
+
 # A subclass has its own schema state, so it reaches the wrapping seam a
 # second time for columns its parent already wrapped.
 class Novel < Book; end
@@ -653,6 +675,36 @@ class BugTest < Minitest::Test
     assert_equal 'writes sci-fi', author.reload.profile.unwrap!.tagline
 
     author.destroy!
+
+    assert_equal 0, Profile.where(author_id: author.id).count
+  end
+
+  # touch: reads the associated record back through the public reader and
+  # asks it to touch itself.
+  def test_a_touching_belongs_to_reaches_the_record_inside_the_option
+    author = Author.create!(name: 'Cixin Liu')
+    Author.where(id: author.id).update_all(updated_at: Time.at(0))
+
+    TouchingBook.create!(title: 'The Dark Forest', author: Some(author))
+
+    assert_operator author.reload.updated_at, :>, Time.at(0)
+  end
+
+  def test_a_dependent_belongs_to_destroys_the_record_inside_the_option
+    author = Author.create!(name: 'Cixin Liu')
+    book = DependentBook.create!(title: 'The Dark Forest', author: Some(author))
+
+    book.destroy!
+
+    assert_nil Author.find_by(id: author.id)
+  end
+
+  # Marking the record a wrapped reader hands back still reaches the save.
+  def test_an_autosaved_has_one_marked_for_destruction_is_destroyed
+    author = CuratedAuthor.create!(name: 'Cixin Liu')
+    author.create_profile!(tagline: 'writes sci-fi')
+    author.profile.unwrap!.mark_for_destruction
+    author.save!
 
     assert_equal 0, Profile.where(author_id: author.id).count
   end

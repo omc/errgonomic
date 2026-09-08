@@ -19,8 +19,9 @@ module Errgonomic
     # 1. None#nil? answers true, so AR internals and ordinary nil checks
     #    treat an absent value as absent. Equality does not follow suit:
     #    None() == nil stays false.
-    # 2. Some delegates persisted?, marked_for_destruction?, and touch_later
-    #    to its record, so a Some can stand in for it during persistence.
+    # 2. Some delegates persisted? and touch_later to its record, so a Some
+    #    can stand in for it where ActiveRecord reads an association back
+    #    through its public reader.
     # 3. Boundaries into ActiveRecord unwrap Options: quoting and predicate
     #    building at the SQL boundary, attribute and singular association
     #    writers on assignment, and the type cast for a value that reaches
@@ -248,10 +249,9 @@ end
 
 module Errgonomic
   module Option
-    # Delegate ActiveRecord lifecycle checks to the wrapped record, so a Some
-    # can stand in for its record during persistence.
+    # A belongs_to declared touch: true reads the associated record back
+    # through the public reader after a save, then asks it to touch itself.
     class Some
-      delegate :marked_for_destruction?, to: :value
       delegate :persisted?, to: :value
       delegate :touch_later, to: :value
     end
