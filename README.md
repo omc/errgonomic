@@ -257,7 +257,9 @@ class Credential < ApplicationRecord
 end
 ```
 
-**Overriding a wrapped reader.** Wrapped readers live in a module the concern includes into the model, so a model's own `def` of the same name coexists with the wrapper and reads the Option through `super`. The rule is one of layering: anything written in the class body, or included below `Errgonomic::Rails::ActiveRecordOptional`, sits above the wrapper.
+**Overriding a wrapped reader.** Wrapped readers live in a module the concern includes into the model, so a model's own `def` of the same name coexists with the wrapper and reads the Option through `super`. The rule is one of layering: a `def` in the model's own class body, or a module the model itself includes after the errgonomic include, sits above the wrapper and reads the Option from `super`.
+
+The type does not change inside the override. `super` hands back exactly what every other caller of the reader gets, so an override that keeps the Option keeps the model's contract:
 
 ```ruby
 class Book < ApplicationRecord
@@ -266,18 +268,28 @@ class Book < ApplicationRecord
   belongs_to :author, optional: true
 
   def isbn
-    super.unwrap_or('unassigned')   # super is Some(isbn) or None()
+    super.map(&:strip)   # super is Some(isbn) or None(), and so is this
+  end
+
+  def display_isbn
+    isbn.unwrap_or('unassigned')
   end
 end
 ```
 
-A `def` that does not call `super` owns its return value outright: the wrapper stays installed beneath it and nothing reaches it.
+An accessor that hands back a plain value is a different method with a different name, the way a Rust `fn display_name(&self) -> String` sits beside a `name: Option<String>` field. `display_isbn` is that method; `isbn` stays the field.
 
-`Model.errgonomic_optionals` reports which readers a model wrapped, which is how to check that a conversion did what it meant to.
+A same-named `def` that never calls `super` is legal Ruby and the model owns its return value outright: the wrapper stays installed beneath it and nothing reaches it. It is the un-idiomatic spelling, and it leaves two loose ends. `Model.errgonomic_optionals` still reports the reader as wrapped, because the conversion did wrap it. And `validates :isbn, some: true` runs against whatever the override returns, so against a plain `String` it raises `NoMethodError: undefined method 'some?'`.
+
+**Storage stays nullable; the reader is the boundary.** Only the reader returns an Option. `self[:isbn]`, `read_attribute(:isbn)`, `isbn_was`, `isbn_change`, and `attributes` all answer the raw column value or `nil`, which is where Rails already draws the line for a reader override: the attribute is the storage, the reader is the interface. Rust would expect the Option all the way down, and this is the largest place the gem does not follow it, because dirty tracking, serialization, and query building each read the attribute directly and an Option would have to survive all of them.
+
+Writers take plain values, and lifting is the reader's job: `book.isbn = '9780765377104'`, or `book.isbn = opt.unwrap_or(nil)` when you are holding an Option. Assigning `None()` stores `nil`, since `None#nil?` is true.
+
+`Model.errgonomic_optionals` reports which readers a model wrapped, including nullable foreign-key columns, so `book.author_id` is `Some(1)` alongside `book.author`. That is how to check that a conversion did what it meant to.
 
 - `delegate_optional :name, to: :association` (available on all models) delegates through an optional association, returning an Option instead of raising on nil.
 
-`Object#to_option` is also available in Rails to lift any value into an Option (`nil.to_option # => None()`).
+`Object#to_option` lifts any value into an Option (`nil.to_option # => None()`). It lifts once and only once: an Option passes through unchanged (`Some(1).to_option # => Some(1)`), so lifting a value whose provenance you do not know is safe. That is the rule everywhere in the integration. An ActiveRecord attribute or association is never an optional of an optional, so a wrapped reader never nests a second Option around a value that already is one. Nesting is invisible until something reaches for the inner value, which is the ambiguous failure the type exists to prevent.
 
 #### ActiveRecord compromises
 
