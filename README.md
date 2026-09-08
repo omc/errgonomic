@@ -209,7 +209,7 @@ end
 
 When `Rails::Railtie` is defined, Errgonomic installs a Railtie with two opt-in integrations for ActiveRecord:
 
-- `include Errgonomic::Rails::ActiveRecordOptional` in a model makes its nullable attributes and `optional: true` associations return `Some(value)` or `None()` instead of a value-or-nil. Every nullable column and optional association is wrapped, with no per-attribute opt-in. Three kinds of reader stay unwrapped: attributes declared with `encrypts` and singular associations with `accepts_nested_attributes_for`, both of which ActiveRecord's own machinery reads raw, and anything named by `errgonomic_optional_except`.
+- `include Errgonomic::Rails::ActiveRecordOptional` in a model makes its nullable attributes and `optional: true` associations return `Some(value)` or `None()` instead of a value-or-nil. Every nullable column and optional association is wrapped, with no per-attribute opt-in. Four kinds of reader stay unwrapped: attributes declared with `encrypts` and singular associations with `accepts_nested_attributes_for`, both of which ActiveRecord's own machinery reads raw; a `has_one ..., required: true`, whose absence is a validation failure rather than a value; and anything named by `errgonomic_optional_except`.
 
 ```ruby
 class Credential < ApplicationRecord
@@ -293,13 +293,13 @@ Writers take plain values, and lifting is the reader's job: `book.isbn = '978076
 
 #### ActiveRecord compromises
 
-ActiveRecord assumes things about accessors that a strict Rust Option cannot satisfy, so the integration carries five deliberate compromises. Everywhere else, treat a departure from Rust's `Option` semantics as a bug; these five are intended:
+This is the register of where the gem leaves the Rust idiom, and why. ActiveRecord assumes things about accessors that a strict Rust `Option` cannot satisfy, so the integration carries five deliberate compromises, each one forced by a specific piece of ActiveRecord machinery rather than chosen. Everywhere else, treat a departure from Rust's `Option` semantics as a bug; these five are intended:
 
 1. `None#nil?` answers `true`, so ActiveRecord internals and ordinary `.nil?` checks treat an absent value as absent. Equality does not follow suit: `None() == nil` is still `false`.
 2. `Some` delegates `persisted?`, `marked_for_destruction?`, and `touch_later` to its record, so a `Some` can stand in for its record during persistence.
 3. Quoting and the predicate builder are patched so an `Option` passed into `where`/`quote` is unwrapped at the SQL boundary: `Some(v)` binds exactly as `v`, and `None()` as `nil`, so a hash condition asks for `IS NULL`. An array of Options unwraps too. An Option interpolated into raw SQL (`where("id = ?", opt)`) still raises, as it should.
 4. `SomeValidator` provides a presence-style validation for Option attributes.
-5. Attributes declared with `encrypts` are never wrapped: ActiveRecord Encryption's own machinery (a length validator it registers outside `Model.validators`) reads the raw value and cannot survive an Option.
+5. Readers that ActiveRecord's own machinery reads raw are never wrapped: an attribute declared with `encrypts`, whose length validator sits outside `Model.validators` and calls `to_s` on the value, and a singular association with `accepts_nested_attributes_for`, which is assigned through the reader and asks the value whether it is a new record.
 
 The set is closed. If a future integration appears to need a sixth compromise, that is a signal ActiveRecord is pushing back somewhere unmapped, and it warrants a design discussion rather than a quiet patch. `errgonomic_optional_except` is deliberately not on the list: it is configuration, an escape hatch that softens the all-or-nothing include for whatever conflict shows up next, rather than a semantic exception.
 
