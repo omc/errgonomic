@@ -217,7 +217,7 @@ class PrefacedBook < ActiveRecord::Base
   self.table_name = 'books'
 
   def isbn
-    super.unwrap_or('unassigned')
+    super.or_else { Some('unassigned') }
   end
 
   def author
@@ -234,7 +234,7 @@ class AnnotatedBook < ActiveRecord::Base
   belongs_to :author, optional: true
 
   def isbn
-    super.unwrap_or('unassigned')
+    super.or_else { Some('unassigned') }
   end
 
   def author
@@ -266,7 +266,7 @@ class EagerlyLoadedBook < ActiveRecord::Base
   load_schema
 
   def isbn
-    super.unwrap_or('unassigned')
+    super.or_else { Some('unassigned') }
   end
 end
 
@@ -276,7 +276,7 @@ class Broadsheet < HouseRecord
   self.table_name = 'magazines'
 
   def issn
-    super.unwrap_or('unregistered')
+    super.or_else { Some('unregistered') }
   end
 end
 
@@ -611,17 +611,17 @@ class BugTest < Minitest::Test
   # the model's def wins and reaches the wrapper through super, whether it
   # is written above the include or below it.
   def test_a_column_reader_defined_before_the_include_composes_with_the_wrapper
-    assert_equal 'unassigned', PrefacedBook.create!(title: 'Supernova Era').isbn
-    assert_equal '9780765377104', PrefacedBook.create!(title: 'Death\'s End', isbn: '9780765377104').isbn
+    assert_equal Some('unassigned'), PrefacedBook.create!(title: 'Supernova Era').isbn
+    assert_equal Some('9780765377104'), PrefacedBook.create!(title: 'Death\'s End', isbn: '9780765377104').isbn
   end
 
   def test_a_column_reader_defined_after_the_include_composes_with_the_wrapper
-    assert_equal 'unassigned', AnnotatedBook.create!(title: 'Supernova Era').isbn
-    assert_equal '9780765377104', AnnotatedBook.create!(title: 'Death\'s End', isbn: '9780765377104').isbn
+    assert_equal Some('unassigned'), AnnotatedBook.create!(title: 'Supernova Era').isbn
+    assert_equal Some('9780765377104'), AnnotatedBook.create!(title: 'Death\'s End', isbn: '9780765377104').isbn
   end
 
-  # An association reader written below its macro used to replace the
-  # wrapper outright, leaving the model with a mixed contract.
+  # An association reader written above its macro composes with the wrapper
+  # the same way one written below it does.
   def test_an_association_reader_defined_before_the_macro_composes_with_the_wrapper
     author = Author.create!(name: 'Cixin Liu')
 
@@ -653,16 +653,16 @@ class BugTest < Minitest::Test
   end
 
   # Whether the class body has already touched the schema decides when the
-  # column wrappers are generated, and used to decide whether an override
-  # survived at all.
+  # column wrappers are generated, and an override composes with them either
+  # way.
   def test_an_override_is_unaffected_by_when_the_schema_loads
-    assert_equal 'unassigned', EagerlyLoadedBook.create!(title: 'Supernova Era').isbn
-    assert_equal '9780765377104', EagerlyLoadedBook.create!(title: 'Death\'s End', isbn: '9780765377104').isbn
+    assert_equal Some('unassigned'), EagerlyLoadedBook.create!(title: 'Supernova Era').isbn
+    assert_equal Some('9780765377104'), EagerlyLoadedBook.create!(title: 'Death\'s End', isbn: '9780765377104').isbn
   end
 
   def test_a_model_below_the_base_class_can_override_a_wrapped_reader
-    assert_equal 'unregistered', Broadsheet.create!(title: 'Nature').issn
-    assert_equal '1937-7843', Broadsheet.create!(title: 'Clarkesworld', issn: '1937-7843').issn
+    assert_equal Some('unregistered'), Broadsheet.create!(title: 'Nature').issn
+    assert_equal Some('1937-7843'), Broadsheet.create!(title: 'Clarkesworld', issn: '1937-7843').issn
   end
 
   # An override does not take a reader out of the wrapped set: what a
