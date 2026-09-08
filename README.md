@@ -283,7 +283,7 @@ A same-named `def` that never calls `super` is legal Ruby and the model owns its
 
 **Storage stays nullable; the reader is the boundary.** Only the reader returns an Option. `self[:isbn]`, `read_attribute(:isbn)`, `isbn_was`, `isbn_change`, and `attributes` all answer the raw column value or `nil`, which is where Rails already draws the line for a reader override: the attribute is the storage, the reader is the interface. Rust would expect the Option all the way down, and this is the largest place the gem does not follow it, because dirty tracking, serialization, and query building each read the attribute directly and an Option would have to survive all of them.
 
-Writers take plain values, and lifting is the reader's job: `book.isbn = '9780765377104'`, or `book.isbn = opt.unwrap_or(nil)` when you are holding an Option. Assigning `None()` stores `nil`, since `None#nil?` is true.
+Writers take plain values, and lifting is the reader's job: `book.isbn = '9780765377104'`, or `book.isbn = opt.unwrap_or(nil)` when you are holding an Option. Assigning `None()` stores `nil`, since `None#nil?` is true. A singular association writer is the exception: a `belongs_to` or `has_one` writer takes either a record or an Option of one, so `other_book.author = book.author` assigns straight through the wrapped reader.
 
 `Model.errgonomic_optionals` reports which readers a model wrapped, including nullable foreign-key columns, so `book.author_id` is `Some(1)` alongside `book.author`. That is how to check that a conversion did what it meant to.
 
@@ -297,7 +297,7 @@ This is the register of where the gem leaves the Rust idiom, and why. ActiveReco
 
 1. `None#nil?` answers `true`, so ActiveRecord internals and ordinary `.nil?` checks treat an absent value as absent. Equality does not follow suit: `None() == nil` is still `false`.
 2. `Some` delegates `persisted?`, `marked_for_destruction?`, and `touch_later` to its record, so a `Some` can stand in for its record during persistence.
-3. Quoting and the predicate builder are patched so an `Option` passed into `where`/`quote` is unwrapped at the SQL boundary: `Some(v)` binds exactly as `v`, and `None()` as `nil`, so a hash condition asks for `IS NULL`. An array of Options unwraps too. An Option interpolated into raw SQL (`where("id = ?", opt)`) still raises, as it should.
+3. Quoting and the predicate builder are patched so an `Option` passed into `where`/`quote` is unwrapped at the SQL boundary: `Some(v)` binds exactly as `v`, and `None()` as `nil`, so a hash condition asks for `IS NULL`. An array of Options unwraps too. An Option interpolated into raw SQL (`where("id = ?", opt)`) still raises, as it should. Singular association writers unwrap on the same principle: `book.author = Some(author)` assigns the record and `book.author = None()` clears the association, while a `Some` of the wrong class still raises `AssociationTypeMismatch`.
 4. `SomeValidator` provides a presence-style validation for Option attributes.
 5. Readers that ActiveRecord's own machinery reads raw are never wrapped: an attribute declared with `encrypts`, whose length validator sits outside `Model.validators` and calls `to_s` on the value, and a singular association with `accepts_nested_attributes_for`, which is assigned through the reader and asks the value whether it is a new record.
 

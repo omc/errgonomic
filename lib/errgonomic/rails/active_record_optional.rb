@@ -21,8 +21,9 @@ module Errgonomic
     #    None() == nil stays false.
     # 2. Some delegates persisted?, marked_for_destruction?, and touch_later
     #    to its record, so a Some can stand in for it during persistence.
-    # 3. Quoting and predicate-building prepends unwrap Options at the SQL
-    #    boundary, so an Option can be passed to where/quote.
+    # 3. Boundaries into ActiveRecord unwrap Options: quoting and predicate
+    #    building at the SQL boundary, and singular association writers on
+    #    assignment.
     # 4. SomeValidator provides a presence-style validation for Option
     #    attributes.
     # 5. Readers that ActiveRecord's own machinery reads raw are never
