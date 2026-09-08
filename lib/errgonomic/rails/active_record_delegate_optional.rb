@@ -8,6 +8,21 @@ module Errgonomic
     module ActiveRecordDelegateOptional
       extend ActiveSupport::Concern
 
+      # YARD does not see through a concern's class_methods block, so the
+      # method it documents is declared rather than read.
+      #
+      # @!method delegate_optional(*methods, to: nil, prefix: nil, private: nil)
+      #   @example prefix forms name the reader, as they do for Rails' delegate
+      #     article = Article.create!(title: 'Omelas', author: Author.create!(name: 'Ursula', bio: 'writes'))
+      #     article.author_name # => Some('Ursula')
+      #     article.writer_name # => Some('Ursula')
+      #     article.bio # => Some('writes')
+      #   @example an automatic prefix needs a target it can name a method after
+      #     begin
+      #       Class.new(Article) { delegate_optional :name, to: :@author, prefix: true }
+      #     rescue ArgumentError => e
+      #       e.message
+      #     end # => 'Can only automatically set the delegation prefix when delegating to a method.'
       class_methods do
         # Names attributes that ActiveRecordOptional must leave alone. It has to
         # be callable before the include, which is what starts the wrapping for
@@ -69,15 +84,37 @@ module Errgonomic
         def delegate_optional(*methods, to: nil, prefix: nil, private: nil)
           return if to.nil?
 
+          complaint = delegate_optional_complaint(to, prefix)
+          raise ::ArgumentError, complaint if complaint
+
           methods.each do |method_name|
-            prefixed_method_name = prefix == true ? "#{to}_#{method_name}" : method_name
-            class_eval <<-RUBY, __FILE__, __LINE__ + 1
-              def #{prefixed_method_name}
-                #{to}.map { |obj| obj.send(:#{method_name}) }
-              end
-            RUBY
-            send(:private, prefixed_method_name) if private
+            reader = "#{delegate_optional_prefix(to, prefix)}#{method_name}"
+            define_optional_delegation(to, method_name, reader)
+            send(:private, reader) if private
           end
+        end
+
+        def define_optional_delegation(to, method_name, reader)
+          class_eval <<-RUBY, __FILE__, __LINE__ + 1
+            def #{reader}
+              #{to}.map { |obj| obj.send(:#{method_name}) }
+            end
+          RUBY
+        end
+
+        # true asks for the target's own name; any other prefix is the name.
+        def delegate_optional_prefix(to, prefix)
+          return '' unless prefix
+
+          "#{prefix == true ? to : prefix}_"
+        end
+
+        # A declaration that cannot mean what it says is a mistake where it is
+        # written, rather than a method name nothing can call.
+        def delegate_optional_complaint(to, prefix)
+          return unless prefix == true && /^[^a-z_]/.match?(to.to_s)
+
+          'Can only automatically set the delegation prefix when delegating to a method.'
         end
       end
     end

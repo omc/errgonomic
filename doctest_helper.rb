@@ -14,6 +14,16 @@ ActiveRecord::Base.logger = Logger.new(File::NULL)
 # One nullable column per type the cast boundary has to map.
 ActiveRecord::Schema.verbose = false
 ActiveRecord::Schema.define do
+  create_table 'authors', force: :cascade do |t|
+    t.string :name
+    t.text :bio
+  end
+
+  create_table 'articles', force: :cascade do |t|
+    t.string :title
+    t.references :author
+  end
+
   create_table 'notes', force: :cascade do |t|
     t.boolean :pinned
     t.string :title
@@ -31,6 +41,19 @@ Errgonomic::Rails.setup_before
 
 class Note < ActiveRecord::Base
   include Errgonomic::Rails::ActiveRecordOptional
+end
+
+# An unconverted delegation target: its readers hand back plain values.
+class Author < ActiveRecord::Base
+end
+
+# A converted model reads its association as an Option.
+class Article < ActiveRecord::Base
+  include Errgonomic::Rails::ActiveRecordOptional
+  belongs_to :author, optional: true
+  delegate_optional :name, to: :author, prefix: true
+  delegate_optional :name, to: :author, prefix: :writer
+  delegate_optional :bio, to: :author
 end
 
 # Two validators that answer differently for the same wrapped value.
