@@ -50,6 +50,17 @@ module Errgonomic
           .each { |r| errgonomic_wrap_optional(r.name) }
       end
 
+      # Every EachValidator fetches the attribute through here, so unwrapping
+      # once at this seam is what lets the standard validators weigh the value
+      # rather than the wrapper around it.
+      #
+      # @example presence weighs the value; some: asks only whether it is there
+      #   Memo.new(title: Some(''), body: Some('')).tap(&:valid?).errors[:title] # => ["can't be blank"]
+      #   Memo.new(title: Some(''), body: Some('')).tap(&:valid?).errors[:body] # => []
+      def read_attribute_for_validation(key)
+        Errgonomic::Rails.unwrap_option(super)
+      end
+
       class_methods do
         # Wrapped readers live in a module of their own, the way ActiveRecord
         # keeps its attribute methods, so a model's own def of the same name
@@ -232,11 +243,13 @@ module Errgonomic
   end
 end
 
-# Validates that an Option attribute is Some, analogous to a presence
-# validation on a plain attribute.
+# Validates that an attribute is there at all, where presence asks whether it
+# amounts to anything: an empty string is a value, nil and None are not.
+# Lifting the value means the same question can be asked of a model the
+# concern never converted.
 class SomeValidator < ActiveModel::EachValidator
   def validate_each(record, attribute, value)
-    record.errors.add(attribute, 'is invalid') unless value.some?
+    record.errors.add(attribute, 'is invalid') unless value.to_option.some?
   end
 end
 

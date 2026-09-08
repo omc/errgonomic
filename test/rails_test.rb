@@ -69,6 +69,16 @@ ActiveRecord::Schema.define do
     t.timestamps
   end
 
+  create_table 'manuscripts', force: :cascade do |t|
+    t.string :title
+    t.string :currency
+    t.string :status
+    t.string :isbn
+    t.integer :pages
+    t.references :author
+    t.timestamps
+  end
+
   create_table 'notes', force: :cascade do |t|
     t.boolean :pinned
     t.string :title
@@ -354,6 +364,48 @@ class DefaultedNote < ActiveRecord::Base
   attribute :rank, :integer, default: Some(0)
   attribute :meta, :json, default: Some({ 'shelf' => 'new' })
   attribute :title, :string, default: None()
+end
+
+# A converted model carrying one validator family per wrapped column, so
+# each is asked what it makes of a Some and of a None.
+class Manuscript < ActiveRecord::Base
+  include Errgonomic::Rails::ActiveRecordOptional
+  validates :currency, inclusion: { in: %w[USD EUR] }, allow_nil: true
+  validates :status, exclusion: { in: %w[withdrawn] }, allow_nil: true
+  validates :isbn, length: { maximum: 13 }, format: { with: /\A[0-9]*\z/ }, allow_nil: true
+  validates :pages, numericality: { greater_than: 0 }, allow_nil: true
+end
+
+# presence and some: ask different questions of the same attribute: whether
+# the value amounts to anything, and whether it is there at all.
+class SubmittedManuscript < ActiveRecord::Base
+  self.table_name = 'manuscripts'
+  include Errgonomic::Rails::ActiveRecordOptional
+  validates :title, presence: true, some: true
+end
+
+# some: is available on any model, so it has to answer for a plain value too.
+class PlainManuscript < ActiveRecord::Base
+  self.table_name = 'manuscripts'
+  validates :title, some: true
+end
+
+# A belongs_to without optional: true is required, and Rails validates it
+# with a presence validation of its own.
+class AttributedManuscript < ActiveRecord::Base
+  self.table_name = 'manuscripts'
+  self.belongs_to_required_by_default = true
+  include Errgonomic::Rails::ActiveRecordOptional
+  belongs_to :author
+end
+
+# A wrapped has_one validated for presence, the association side of the same
+# seam.
+class ProfiledAuthor < ActiveRecord::Base
+  self.table_name = 'authors'
+  include Errgonomic::Rails::ActiveRecordOptional
+  has_one :profile, foreign_key: :author_id
+  validates :profile, presence: true
 end
 
 class BugTest < Minitest::Test
@@ -1080,6 +1132,92 @@ class BugTest < Minitest::Test
 
     assert_equal AnnotatedBook, AnnotatedBook.instance_method(:isbn).owner
     assert_equal Book.errgonomic_optional_readers, Book.instance_method(:isbn).owner
+  end
+
+  # A validator compares against the value, not the wrapper: an Option is
+  # never a member of the list a model spells out.
+  def test_inclusion_validates_the_value_inside_a_some
+    assert_predicate Manuscript.new(currency: Some('USD')), :valid?
+    refute_predicate Manuscript.new(currency: Some('GBP')), :valid?
+    assert_predicate Manuscript.new(currency: None()), :valid?
+  end
+
+  def test_exclusion_validates_the_value_inside_a_some
+    assert_predicate Manuscript.new(status: Some('draft')), :valid?
+    refute_predicate Manuscript.new(status: Some('withdrawn')), :valid?
+    assert_predicate Manuscript.new(status: None()), :valid?
+  end
+
+  # An empty string is absent as far as presence is concerned, and wrapping
+  # it does not make it a value.
+  def test_presence_rejects_an_empty_string_inside_a_some
+    blank = SubmittedManuscript.new(title: Some(''))
+
+    refute_predicate blank, :valid?
+    assert_equal ['can\'t be blank'], blank.errors[:title]
+
+    assert_predicate SubmittedManuscript.new(title: Some('Death\'s End')), :valid?
+    refute_predicate SubmittedManuscript.new(title: None()), :valid?
+  end
+
+  # Both validators reach the value through to_s, which an Option refuses.
+  def test_length_and_format_validate_the_value_inside_a_some
+    assert_predicate Manuscript.new(isbn: Some('9780765377104')), :valid?
+    refute_predicate Manuscript.new(isbn: Some('97807653771049')), :valid?
+    refute_predicate Manuscript.new(isbn: Some('978-0765377')), :valid?
+    assert_predicate Manuscript.new(isbn: None()), :valid?
+  end
+
+  def test_numericality_validates_the_value_inside_a_some
+    assert_predicate Manuscript.new(pages: Some(400)), :valid?
+    refute_predicate Manuscript.new(pages: Some(-1)), :valid?
+    assert_predicate Manuscript.new(pages: None()), :valid?
+  end
+
+  # The presence validation Rails adds for a required belongs_to reads the
+  # association through the same seam.
+  def test_a_required_belongs_to_reports_a_missing_record
+    author = Author.create!(name: 'Cixin Liu')
+    missing = AttributedManuscript.new(author: None())
+
+    refute_predicate missing, :valid?
+    assert_equal ['must exist'], missing.errors[:author]
+
+    assert_predicate AttributedManuscript.new(author: Some(author)), :valid?
+  end
+
+  def test_a_presence_validated_has_one_reports_a_missing_record
+    author = ProfiledAuthor.new(name: 'Cixin Liu')
+
+    refute_predicate author, :valid?
+    assert_equal ['can\'t be blank'], author.errors[:profile]
+
+    author.profile = Profile.new(tagline: 'writes sci-fi')
+
+    assert_predicate author, :valid?
+  end
+
+  # some: asks only whether the value is there, which is what separates it
+  # from presence, and it asks it of any model: a plain value is a value.
+  def test_some_asks_whether_the_value_is_there
+    blank = SubmittedManuscript.new(title: Some(''))
+    blank.valid?
+
+    refute_includes blank.errors[:title], 'is invalid'
+
+    absent = SubmittedManuscript.new(title: None())
+    absent.valid?
+
+    assert_includes absent.errors[:title], 'is invalid'
+
+    assert_predicate PlainManuscript.new(title: 'Death\'s End'), :valid?
+    refute_predicate PlainManuscript.new(title: nil), :valid?
+  end
+
+  # Every wrapped column of an unsaved record is None, and validation walks
+  # all of them.
+  def test_validating_a_converted_record_with_no_validations_does_not_raise
+    assert_predicate Note.new, :valid?
   end
 
   private
