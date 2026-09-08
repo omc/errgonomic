@@ -497,6 +497,16 @@ class BugTest < Minitest::Test
 
   # A None reads as absent, which for a hash condition means IS NULL rather
   # than an = NULL that can never match.
+  # find_by binds its values outside the predicate builder, so an Option
+  # reaches the column type rather than the quoting seam. A regression guard:
+  # both of these hold today, and the serialize boundary has to keep them.
+  def test_find_by_takes_an_option_on_a_string_or_integer_column
+    note = Note.create!(title: 'Ball Lightning', rank: 987)
+
+    assert_equal note.id, Note.find_by(title: Some('Ball Lightning')).id
+    assert_equal note.id, Note.find_by(rank: Some(987)).id
+  end
+
   def test_where_with_a_none_asks_for_null
     unshelved = Book.create!(title: 'Ball Lightning')
 
@@ -604,6 +614,7 @@ class BugTest < Minitest::Test
     assert_equal 'tok-42', credential.reload.access_token.unwrap!
     assert_equal credential.id, Credential.find_by(access_token: 'tok-42').id
     assert_equal credential.id, Credential.where(access_token: Some('tok-42')).first.id
+    assert_equal credential.id, Credential.find_by(access_token: Some('tok-42')).id
     assert_nil Credential.find_by(access_token: 'tok-43')
   end
 

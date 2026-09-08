@@ -24,9 +24,9 @@ module Errgonomic
     #    through its public reader.
     # 3. Boundaries into ActiveRecord unwrap Options: quoting and predicate
     #    building at the SQL boundary, attribute and singular association
-    #    writers on assignment, and the type cast for a value that reaches
-    #    the database without passing a writer, as update_all, insert_all,
-    #    upsert and an attribute default do.
+    #    writers on assignment, and the type cast and serialization for a
+    #    value that reaches the database without passing a writer, as
+    #    update_all, insert_all, upsert, an attribute default and find_by do.
     # 4. SomeValidator asks whether a value is there at all, where presence
     #    asks whether it amounts to anything: Some("") passes some: true and
     #    fails presence. It lifts what it is handed, so it asks the same
@@ -438,6 +438,19 @@ module Errgonomic
       #   ActiveModel::Type::Integer.new.cast(None()) # => nil
       #   ActiveModel::Type::Integer.new.cast(Some(3)) # => 3
       def cast(value)
+        super(Errgonomic::Rails.unwrap_option(value))
+      end
+
+      # find_by binds its values straight into a cached statement rather than
+      # through the predicate builder, so the column type serializes what the
+      # caller passed. Most types reach here through their own serialize, and
+      # an encrypted one hands its value to the underlying type's before
+      # calling to_s on the result.
+      #
+      # @example
+      #   ActiveModel::Type::String.new.serialize(Some('The Dark Forest')) # => 'The Dark Forest'
+      #   ActiveModel::Type::String.new.serialize(None()) # => nil
+      def serialize(value)
         super(Errgonomic::Rails.unwrap_option(value))
       end
     end
