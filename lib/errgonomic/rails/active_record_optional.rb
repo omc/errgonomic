@@ -28,8 +28,11 @@ module Errgonomic
     #    upsert and an attribute default do.
     # 4. SomeValidator provides a presence-style validation for Option
     #    attributes.
-    # 5. Readers that ActiveRecord's own machinery reads raw are never
-    #    wrapped: an attribute declared with encrypts, whose length validator
+    # 5. Where ActiveRecord's own machinery reads a value raw, it gets one.
+    #    Validation unwraps at read_attribute_for_validation, the seam every
+    #    EachValidator fetches an attribute through, so a standard validator
+    #    weighs the value rather than the wrapper. Two readers are not wrapped
+    #    at all: an attribute declared with encrypts, whose length validator
     #    sits outside Model.validators and calls to_s on the value, and a
     #    singular association with nested attributes, which are assigned
     #    through the reader and ask the value whether it is a new record.
