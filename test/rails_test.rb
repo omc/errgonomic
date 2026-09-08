@@ -242,6 +242,44 @@ class AnnotatedBook < ActiveRecord::Base
   end
 end
 
+# A has_one composes the same way, and a def that never calls super owns
+# its value outright.
+class AnnotatedAuthor < ActiveRecord::Base
+  self.table_name = 'authors'
+  include Errgonomic::Rails::ActiveRecordOptional
+  has_one :profile, foreign_key: :author_id
+
+  def profile
+    super.map(&:tagline)
+  end
+
+  def bio
+    'undisclosed'
+  end
+end
+
+# Touching the schema from the class body generates the column wrappers
+# before the override below is read.
+class EagerlyLoadedBook < ActiveRecord::Base
+  self.table_name = 'books'
+  include Errgonomic::Rails::ActiveRecordOptional
+  load_schema
+
+  def isbn
+    super.unwrap_or('unassigned')
+  end
+end
+
+# A model below the base class has no include of its own to sit above or
+# below, and overrides a wrapped reader the same way.
+class Broadsheet < HouseRecord
+  self.table_name = 'magazines'
+
+  def issn
+    super.unwrap_or('unregistered')
+  end
+end
+
 class BugTest < Minitest::Test
   def test_optional_attributes
     author = Author.create!(name: 'Cixin Liu')
@@ -583,6 +621,50 @@ class BugTest < Minitest::Test
 
     assert_equal 'Cixin Liu', AnnotatedBook.create!(title: 'The Dark Forest', author_id: author.id).author.unwrap!
     assert AnnotatedBook.create!(title: 'Supernova Era').author.none?
+  end
+
+  def test_a_has_one_override_composes_with_the_wrapper
+    author = AnnotatedAuthor.create!(name: 'Cixin Liu')
+
+    assert author.profile.none?
+
+    Profile.create!(author_id: author.id, tagline: 'writes sci-fi')
+
+    assert_equal 'writes sci-fi', author.reload.profile.unwrap!
+  end
+
+  # A def that never calls super owns its return value: the wrapper is
+  # still installed beneath it, and nothing reaches it.
+  def test_a_reader_that_declines_to_call_super_owns_its_value
+    assert_equal 'undisclosed', AnnotatedAuthor.create!(name: 'Cixin Liu', bio: 'writes sci-fi').bio
+  end
+
+  # Whether the class body has already touched the schema decides when the
+  # column wrappers are generated, and used to decide whether an override
+  # survived at all.
+  def test_an_override_is_unaffected_by_when_the_schema_loads
+    assert_equal 'unassigned', EagerlyLoadedBook.create!(title: 'Supernova Era').isbn
+    assert_equal '9780765377104', EagerlyLoadedBook.create!(title: 'Death\'s End', isbn: '9780765377104').isbn
+  end
+
+  def test_a_model_below_the_base_class_can_override_a_wrapped_reader
+    assert_equal 'unregistered', Broadsheet.create!(title: 'Nature').issn
+    assert_equal '1937-7843', Broadsheet.create!(title: 'Clarkesworld', issn: '1937-7843').issn
+  end
+
+  # An override does not take a reader out of the wrapped set: what a
+  # conversion touched is still what the model reports.
+  def test_an_overridden_reader_is_still_reported_as_wrapped
+    assert_includes AnnotatedBook.errgonomic_optionals, 'isbn'
+    assert_includes AnnotatedBook.errgonomic_optionals, 'author'
+    assert_includes AnnotatedAuthor.errgonomic_optionals, 'bio'
+  end
+
+  # The wrapper and the override own different rungs of the ancestor chain,
+  # which is what lets super reach one from the other.
+  def test_a_wrapper_and_an_override_own_different_rungs
+    assert_equal AnnotatedBook, AnnotatedBook.instance_method(:isbn).owner
+    assert_equal Book.errgonomic_optional_readers, Book.instance_method(:isbn).owner
   end
 
   private
