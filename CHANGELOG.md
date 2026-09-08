@@ -1,5 +1,7 @@
 ## [Unreleased]
 
+- `ActiveRecordOptional` installs its wrapped readers into a per-class module, so a model's own reader of the same name composes with the wrapper through `super` instead of one silently replacing the other
+
 ## [0.4.1] - 2025-02-20
 
 - Bugfix: `unwrap_or_else` yields the inner error

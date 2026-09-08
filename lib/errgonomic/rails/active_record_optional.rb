@@ -4,6 +4,11 @@ module Errgonomic
   module Rails
     # Concern to make ActiveRecord optional attributes and associations return an Option.
     #
+    # Wrapped readers live in a per-class module included into the model, so
+    # a model's own def of the same name wins and reads the Option from
+    # super. Anything written in the class body, or included below this
+    # concern, sits above the wrapper for the same reason.
+    #
     # Five pragmatic compromises below satisfy ActiveRecord's assumptions
     # about how accessors behave. They are deliberate exceptions to "Option
     # behaves like Rust's Option", and the set is closed: a sixth would be a

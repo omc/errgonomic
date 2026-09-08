@@ -249,6 +249,22 @@ class Credential < ApplicationRecord
 end
 ```
 
+**Overriding a wrapped reader.** Wrapped readers live in a module the concern includes into the model, so a model's own `def` of the same name coexists with the wrapper and reads the Option through `super`. The rule is one of layering: anything written in the class body, or included below `Errgonomic::Rails::ActiveRecordOptional`, sits above the wrapper.
+
+```ruby
+class Book < ApplicationRecord
+  include Errgonomic::Rails::ActiveRecordOptional
+
+  belongs_to :author, optional: true
+
+  def isbn
+    super.unwrap_or('unassigned')   # super is Some(isbn) or None()
+  end
+end
+```
+
+A `def` that does not call `super` owns its return value outright: the wrapper stays installed beneath it and nothing reaches it.
+
 `Model.errgonomic_optionals` reports which readers a model wrapped, which is how to check that a conversion did what it meant to.
 
 - `delegate_optional :name, to: :association` (available on all models) delegates through an optional association, returning an Option instead of raising on nil.
