@@ -4,6 +4,10 @@ module Errgonomic
   module Option
     # The base class for all options. Some and None are subclasses.
     #
+    # An Option is an object, so it is always truthy. A None does not stand
+    # in for nil in a conditional, and `||` hands back the wrapper rather
+    # than the fallback. Reach for a combinator to get at the inner value.
+    #
     class Any
       include Comparable
 
@@ -333,10 +337,13 @@ module Errgonomic
         value
       end
 
-      # returns the inner value if present, else returns the default value
+      # returns the inner value if present, else returns the default value.
+      # This is the spelling `opt || default` cannot give you: an Option is
+      # truthy, so `||` never reaches the fallback.
       # @example
       #   Some(1).unwrap_or(2) # => 1
       #   None().unwrap_or(2) # => 2
+      #   None() || 2 # => None()
       def unwrap_or(default)
         return default if none?
 

@@ -4,7 +4,7 @@ plugins: rubocop-yard
 # the assertions. Long lines carrying a `#=>` expectation are allowed.
 Layout/LineLength:
   AllowedPatterns:
-    - '#=>'
+    - "#=>"
 
 # Some(), None(), Ok() and Err() are the library's Rust-style value
 # constructors; their capitalized names are the point.
@@ -38,12 +38,18 @@ Metrics:
 # The ActiveRecord hooks in the optional concern are one subject — where a
 # reader may come from and what leaves it alone — and reading them together is
 # the point. The generated reader is a heredoc, which the length cops count as
-# if it were code.
+# if it were code. What a model declares about errgonomic before the concern
+# acts is one subject in the same way.
 Metrics/BlockLength:
   Exclude:
     - lib/errgonomic/rails/active_record_optional.rb
+    - lib/errgonomic/rails/active_record_delegate_optional.rb
     - test/**/*
 Metrics/MethodLength:
+  Exclude:
+    - lib/errgonomic/rails/active_record_optional.rb
+    - test/**/*
+Metrics/ModuleLength:
   Exclude:
     - lib/errgonomic/rails/active_record_optional.rb
     - test/**/*

@@ -2,6 +2,12 @@
 
 Errgonomic provides some lightweight, opinionated ergonomics for error handling in Ruby. These semantics are a blend of Rails `present?` conventions, and Rust `Option` and `Result` type combinators. Without going full Option and Result. Probably.
 
+## Design
+
+Errgonomic aims at the intersection of two idioms rather than translating one into the other. Rails supplies the mechanism: a concern, an attribute reader overridden with `super`, the reader as the boundary of a model's public surface. Rust supplies the shape of the value: an `Option` you handle with combinators, instead of a value that may or may not be `nil`. Convention over configuration and least surprise are the tests every design choice here has to pass, and where the two idioms already agree we follow the convention and say nothing more about it.
+
+Where the gem leaves one of them, the docs say so and say why. The reason is nearly always mechanical: ActiveRecord assumes things about accessors that a strict Option cannot satisfy. The [ActiveRecord compromises](#activerecord-compromises) are that register, enumerated and closed.
+
 ## Installation
 
 Install the gem and add to the application's Gemfile by executing:
@@ -107,11 +113,15 @@ in Errgonomic::Option::None
 end
 ```
 
-An unhandled Option refuses to leak into your output: `to_s`, `to_json`, and `as_json` raise `Errgonomic::SerializeError`, so you handle the inner value deliberately rather than shipping `#<Errgonomic::Option::Some...>` to a user. The refusal covers `as_json` because Hash and Array serialization recurses through that method, and an Option nested in a payload would otherwise serialize as `{"value": ...}`.
+An unhandled Option refuses to leak into your output: `to_s`, `to_json`, and `as_json` raise `Errgonomic::SerializeError`, so you handle the inner value deliberately rather than shipping `#<Errgonomic::Option::Some...>` to a user. The refusal covers `as_json` because Hash and Array serialization recurses through that method, and an Option nested in a payload would otherwise serialize as `{"value": ...}`. A converted ActiveRecord model is the one exception, at the model boundary: it unwraps each attribute as it serializes, so a record's own `as_json` says what an unconverted record's says. See [Rails integration](#rails-integration).
 
 `unwrap!` and `expect!` are for tests and consoles, not application code: they raise on `None`, which is exactly the ambiguous failure the type exists to prevent. Application code should always have a combinator or pattern match that handles the `None` branch explicitly; if none fits, that is a gap worth an issue rather than a reason to unwrap.
 
 Presence follows the discriminant, as in Rust: `Some` is `present?` and `None` is `blank?`, regardless of the wrapped value. So `Some(false).present?` and `Some(nil).present?` are both `true`. If you care about the inner value's own presence, unwrap it first.
+
+Truthiness is the Rails reflex that breaks. An Option is an object, so `None()` is truthy: `isbn || 'unassigned'` hands back the `None`, `if isbn` takes the present branch, and nothing raises to say so. Reach for `unwrap_or('unassigned')`, or for `map` and `and_then` when the fallback is itself an Option. Safe navigation looks for the `nil` object rather than asking `nil?`, so `isbn&.strip` calls into the Option and raises `Errgonomic::UnwrappedAccessError`, where `isbn.map(&:strip)` does what was meant. Under the Rails integration `None#nil?` answers `true`, so an explicit `nil?` check behaves, but `||` and `&.` never consult it.
+
+Writers unwrap under that integration, which changes what a truthiness slip costs rather than removing it. `self.isbn = isbn || 'unassigned'` no longer leaks a wrapper into the database; it silently persists whatever `isbn` held, `nil` included, because a `None` is truthy and the fallback is never reached. The write succeeds and nothing raises. `unwrap_or('unassigned')` is the spelling that means it.
 
 The presence helpers are soft-deprecated on Options in favor of the combinators. The present side unwraps, where on any other object it returns the receiver — `Some(v).present_or_raise!(msg)`, `present_or(default)`, `present_or_else { }`, and `presence` all yield `v`, and `None` raises, substitutes, or answers `nil` — and each call prints a one-line stderr nudge naming the combinator to use instead (`expect!`, `unwrap_or`, `unwrap_or_else`, `unwrap_or(nil)`). The blank side (`blank_or*`) raises `UnwrappedAccessError` outright: an Option's blankness is its discriminant, so test it with `none?`.
 
@@ -201,14 +211,14 @@ end
 
 When `Rails::Railtie` is defined, Errgonomic installs a Railtie with two opt-in integrations for ActiveRecord:
 
-- `include Errgonomic::Rails::ActiveRecordOptional` in a model makes its nullable attributes and `optional: true` associations return `Some(value)` or `None()` instead of a value-or-nil. Every nullable column and optional association is wrapped, with no per-attribute opt-in. Three kinds of reader stay unwrapped: attributes declared with `encrypts` and singular associations with `accepts_nested_attributes_for`, both of which ActiveRecord's own machinery reads raw, and anything named by `errgonomic_optional_except`.
+- `include Errgonomic::Rails::ActiveRecordOptional` in a model makes its nullable attributes and `optional: true` associations return `Some(value)` or `None()` instead of a value-or-nil. Every nullable column and optional association is wrapped, with no per-attribute opt-in. Three kinds of reader stay unwrapped: a singular association with `accepts_nested_attributes_for`, which ActiveRecord assigns through the reader and reads raw; a `has_one ..., required: true`, whose absence is a validation failure rather than a value; and anything named by `errgonomic_optional_except`.
 
 ```ruby
 class Credential < ApplicationRecord
   errgonomic_optional_except :legacy_token
   include Errgonomic::Rails::ActiveRecordOptional
 
-  encrypts :access_secret   # also left unwrapped, declared either side of the include
+  encrypts :access_secret   # wrapped like any other nullable column
   has_one :rotation_schedule # wrapped: Some(schedule) or None()
   has_one :owner, required: true # left unwrapped: absence is a validation failure
 end
@@ -249,23 +259,78 @@ class Credential < ApplicationRecord
 end
 ```
 
-`Model.errgonomic_optionals` reports which readers a model wrapped, which is how to check that a conversion did what it meant to.
+**Overriding a wrapped reader.** Wrapped readers live in a module the concern includes into the model, so a model's own `def` of the same name coexists with the wrapper and reads the Option through `super`. The rule is one of layering: a `def` in the model's own class body, or a module the model itself includes after the errgonomic include, sits above the wrapper and reads the Option from `super`.
+
+The type does not change inside the override. `super` hands back exactly what every other caller of the reader gets, so an override that keeps the Option keeps the model's contract:
+
+```ruby
+class Book < ApplicationRecord
+  include Errgonomic::Rails::ActiveRecordOptional
+
+  belongs_to :author, optional: true
+
+  def isbn
+    super.map(&:strip)   # super is Some(isbn) or None(), and so is this
+  end
+
+  def display_isbn
+    isbn.unwrap_or('unassigned')
+  end
+end
+```
+
+An accessor that hands back a plain value is a different method with a different name, the way a Rust `fn display_name(&self) -> String` sits beside a `name: Option<String>` field. `display_isbn` is that method; `isbn` stays the field.
+
+A same-named `def` that never calls `super` is legal Ruby and the model owns its return value outright: the wrapper stays installed beneath it and nothing reaches it. It is the un-idiomatic spelling, and it leaves one loose end: `Model.errgonomic_optionals` still reports the reader as wrapped, because the conversion did wrap it.
+
+**Storage stays nullable; the reader is the boundary.** Only the reader returns an Option. `self[:isbn]`, `read_attribute(:isbn)`, `isbn_was`, `isbn_change`, and `attributes` all answer the raw column value or `nil`, which is where Rails already draws the line for a reader override: the attribute is the storage, the reader is the interface. Rust would expect the Option all the way down, and this is the largest place the gem does not follow it, because dirty tracking, serialization, and query building each read the attribute directly and an Option would have to survive all of them.
+
+Writers take either a plain value or an Option of one, for attributes and singular associations alike, so a wrapped reader's value assigns straight back: `other_book.title = book.title` and `other_book.author = book.author` both do what they read like. `book.isbn = '9780765377104'` means what it always did, and assigning `None()` stores `nil`. Assigning an Option is assigning the value inside it for every column type, so a wrapped `false` stores `false`, and the storage behind the reader stays raw: `changes`, `read_attribute_before_type_cast` and `attributes` see the value, never the wrapper. `update_all`, `insert_all`, `upsert` and an attribute default take Options on the same terms, unwrapping at the type cast rather than at a writer.
+
+The assignment and cast seams are installed on ActiveModel itself, as the quoting and predicate-builder seams are. They apply to every model in the application, whether or not it includes the concern: the concern decides what a reader returns, not what a writer accepts. One gap remains at that boundary: a type whose `cast` or `serialize` never calls `super` sits outside the seam and sees the Option itself. `ActiveRecord::Type::Json#serialize` is one, so `find_by(meta: Some(hash))` on a json column raises where `where(meta: Some(hash))` does not.
+
+**Validation reads the value.** Standard validators on a converted model behave exactly as they do on an unconverted one. `inclusion`, `exclusion`, `presence`, `length`, `format`, `numericality` and the rest weigh the value inside the Option, and a `None` validates like `nil`, because every `EachValidator` fetches its attribute through `read_attribute_for_validation`, which unwraps. `validates :isbn, some: true` is the Option-aware presence check, asking only whether the value is there: `Some('')` passes `some:` and fails `presence: true`, exactly as `''` fails it. Custom validation code is the exception, because it reads the public reader: a `validate :check_isbn` whose body calls `isbn` gets `Some('9780765377104')`, the same as every other caller.
+
+**Serialization.** A converted model serializes as the unconverted one does. `as_json`, `to_json` and `serializable_hash` fetch every attribute through `read_attribute_for_serialization`, which unwraps, so `Some(v)` writes `v` and `None()` writes `null`. Both idioms agree on the default: Rails writes an absent value as `null`, and so does serde unless a field asks otherwise. The refusal stands everywhere else, so a hand-built Option in an arbitrary payload (`{ isbn: book.isbn }.to_json`) still raises `Errgonomic::SerializeError`.
+
+An association under `include:` follows the same rule: `Some(author)` serializes as the record's own hash, and a `None` leaves the key out, which is what `include:` already does with a `nil` association. A `has_many` is never an Option and is untouched. A wrapped reader named in `methods:` unwraps one layer as well, so `as_json(methods: :isbn)` writes the value; a method that hands back a plain value is unchanged.
+
+Omission is the opt-in, as it is in serde, and it is declared on the model rather than on `belongs_to` or `has_one`:
+
+```ruby
+class ApplicationRecord < ActiveRecord::Base
+  include Errgonomic::Rails::ActiveRecordOptional
+  errgonomic_serialize_none :omit                  # drop keys whose value is None
+end
+
+class Book < ApplicationRecord
+  errgonomic_serialize_none :null                  # this model keeps them, as null (the default)
+end
+
+class Manuscript < ApplicationRecord
+  errgonomic_serialize_none :omit, only: %i[isbn]  # only this reader is dropped; except: also accepted
+end
+```
+
+The declaration reads as well above the include as below it, as `errgonomic_optional_except` does. The nearest declaration wins and replaces whatever it inherits, rather than layering onto it, so a reader a scoped declaration does not name keeps the default. Omission drops keys from the payload the caller asked for, so it composes with the caller's own `only:` and `except:`. It governs by reader name wherever the key came from, so a `methods:` entry naming a wrapped reader that reads `None` is dropped along with the reader, while a plain method that happens to return `nil` is kept. A declaration that cannot change a payload raises `ArgumentError` where it is written, naming what to write instead. That covers a mode other than `:null` or `:omit`, `only:` together with `except:`, and a scoped `:null`, which asks for the default on the readers it names and leaves the rest at the default anyway.
+
+`Model.errgonomic_optionals` reports which readers a model wrapped, including nullable foreign-key columns, so `book.author_id` is `Some(1)` alongside `book.author`. That is how to check that a conversion did what it meant to.
 
 - `delegate_optional :name, to: :association` (available on all models) delegates through an optional association, returning an Option instead of raising on nil.
 
-`Object#to_option` is also available in Rails to lift any value into an Option (`nil.to_option # => None()`).
+`Object#to_option` lifts any value into an Option (`nil.to_option # => None()`). It lifts once and only once: an Option passes through unchanged (`Some(1).to_option # => Some(1)`), so lifting a value whose provenance you do not know is safe. That is the rule everywhere in the integration. An ActiveRecord attribute or association is never an optional of an optional, so a wrapped reader never nests a second Option around a value that already is one. Nesting is invisible until something reaches for the inner value, which is the ambiguous failure the type exists to prevent.
 
 #### ActiveRecord compromises
 
-ActiveRecord assumes things about accessors that a strict Rust Option cannot satisfy, so the integration carries five deliberate compromises. Everywhere else, treat a departure from Rust's `Option` semantics as a bug; these five are intended:
+This is the register of where the gem leaves the Rust idiom, and why. ActiveRecord assumes things about accessors that a strict Rust `Option` cannot satisfy, so the integration carries five deliberate compromises, each one forced by a specific piece of ActiveRecord machinery rather than chosen. Everywhere else, treat a departure from Rust's `Option` semantics as a bug; these five are intended:
 
 1. `None#nil?` answers `true`, so ActiveRecord internals and ordinary `.nil?` checks treat an absent value as absent. Equality does not follow suit: `None() == nil` is still `false`.
-2. `Some` delegates `persisted?`, `marked_for_destruction?`, and `touch_later` to its record, so a `Some` can stand in for its record during persistence.
-3. Quoting and the predicate builder are patched so an `Option` passed into `where`/`quote` is unwrapped at the SQL boundary: `Some(v)` binds exactly as `v`, and `None()` as `nil`, so a hash condition asks for `IS NULL`. An array of Options unwraps too. An Option interpolated into raw SQL (`where("id = ?", opt)`) still raises, as it should.
-4. `SomeValidator` provides a presence-style validation for Option attributes.
-5. Attributes declared with `encrypts` are never wrapped: ActiveRecord Encryption's own machinery (a length validator it registers outside `Model.validators`) reads the raw value and cannot survive an Option.
+2. `Some` delegates `persisted?` and `touch_later` to its record, so a `Some` can stand in for it where ActiveRecord reads an association back through its public reader, as a `belongs_to ..., touch: true` does after a save.
+3. Quoting and the predicate builder are patched so an `Option` passed into `where`/`quote` is unwrapped at the SQL boundary: `Some(v)` binds exactly as `v`, and `None()` as `nil`, so a hash condition asks for `IS NULL`. An array of Options unwraps too. An Option interpolated into raw SQL (`where("id = ?", opt)`) still raises, as it should. Assignment unwraps on the same principle. A singular association writer takes an Option of a record: `book.author = Some(author)` assigns it and `book.author = None()` clears the association, while a `Some` of the wrong class still raises `AssociationTypeMismatch`. An attribute writer takes an Option of a value, for every column type, and unwraps before the attribute is built, so `book.isbn = other.isbn` round-trips and nothing behind the reader ever holds a wrapper. The type cast unwraps on the same terms for a value that reaches the database without passing a writer: `update_all`, `insert_all`, `upsert`, and a default declared with `attribute :isbn, :string, default: Some('unassigned')`. Serialization unwraps alongside it, for `find_by`, which binds its values into a cached statement instead of through the predicate builder.
+4. `SomeValidator` asks whether a value is there at all, where `presence` asks whether it amounts to anything: `Some('')` passes `validates :x, some: true` and fails `presence: true`. It lifts what it is handed, so it asks the same question of any model, converted or not.
+5. Where ActiveRecord's own machinery reads a value raw, it gets one. Validation unwraps at `read_attribute_for_validation`, the seam every `EachValidator` fetches an attribute through, and serialization at `read_attribute_for_serialization`, the seam every attribute in a payload is fetched through, so a standard validator weighs the value and a payload carries it rather than the wrapper. A singular association with `accepts_nested_attributes_for` goes further and keeps its plain reader: nested attributes are assigned through the reader, and ActiveRecord asks whatever it finds there whether it is a new record.
 
-The set is closed. If a future integration appears to need a sixth compromise, that is a signal ActiveRecord is pushing back somewhere unmapped, and it warrants a design discussion rather than a quiet patch. `errgonomic_optional_except` is deliberately not on the list: it is configuration, an escape hatch that softens the all-or-nothing include for whatever conflict shows up next, rather than a semantic exception.
+The set is closed. If a future integration appears to need a sixth compromise, that is a signal ActiveRecord is pushing back somewhere unmapped, and it warrants a design discussion rather than a quiet patch. `errgonomic_optional_except` and `errgonomic_serialize_none` are deliberately not on the list: they are configuration, an escape hatch that softens the all-or-nothing include for whatever conflict shows up next and a choice of how an absent value is written, rather than semantic exceptions.
 
 ## Development
 
