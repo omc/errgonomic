@@ -22,8 +22,10 @@ module Errgonomic
     # 2. Some delegates persisted?, marked_for_destruction?, and touch_later
     #    to its record, so a Some can stand in for it during persistence.
     # 3. Boundaries into ActiveRecord unwrap Options: quoting and predicate
-    #    building at the SQL boundary, and attribute and singular association
-    #    writers on assignment.
+    #    building at the SQL boundary, attribute and singular association
+    #    writers on assignment, and the type cast for a value that reaches
+    #    the database without passing a writer, as update_all, insert_all,
+    #    upsert and an attribute default do.
     # 4. SomeValidator provides a presence-style validation for Option
     #    attributes.
     # 5. Readers that ActiveRecord's own machinery reads raw are never
@@ -410,11 +412,27 @@ module Errgonomic
     # hash of values against the column type, as does an attribute default.
     # The cast is the one place they all share, so a Some casts as its inner
     # value and a None as nil.
+    #
     module ActiveModelTypeCast
       # @example
       #   ActiveModel::Type::Boolean.new.cast(Some(false)) # => false
       #   ActiveModel::Type::String.new.cast(Some('The Dark Forest')) # => 'The Dark Forest'
       #   ActiveModel::Type::Integer.new.cast(None()) # => nil
+      #   ActiveModel::Type::Integer.new.cast(Some(3)) # => 3
+      def cast(value)
+        super(Errgonomic::Rails.unwrap_options(value))
+      end
+    end
+
+    # Two of ActiveModel's type helpers read the value before Type::Value
+    # ever sees it: Numeric asks it for presence, which on an Option is the
+    # soft-deprecated unwrap, and Mutable serializes it, which an Option
+    # refuses. They need a module of their own, because a module already
+    # somewhere in a type's ancestors is not inserted into it a second time.
+    module ActiveModelTypeHelperCast
+      # @example
+      #   ActiveModel::Type::Integer.new.cast(Some(0)) # => 0
+      #   ActiveRecord::Type::Json.new.cast(Some({ 'a' => 1 })) # => { 'a' => 1 }
       def cast(value)
         super(Errgonomic::Rails.unwrap_options(value))
       end
@@ -423,3 +441,5 @@ module Errgonomic
 end
 
 ActiveModel::Type::Value.prepend(Errgonomic::Rails::ActiveModelTypeCast)
+ActiveModel::Type::Helpers::Numeric.prepend(Errgonomic::Rails::ActiveModelTypeHelperCast)
+ActiveModel::Type::Helpers::Mutable.prepend(Errgonomic::Rails::ActiveModelTypeHelperCast)

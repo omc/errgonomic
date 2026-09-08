@@ -346,6 +346,16 @@ class Note < ActiveRecord::Base
   include Errgonomic::Rails::ActiveRecordOptional
 end
 
+# A declared default is cast on its way into a new record rather than
+# assigned through a writer.
+class DefaultedNote < ActiveRecord::Base
+  self.table_name = 'notes'
+  attribute :pinned, :boolean, default: Some(false)
+  attribute :rank, :integer, default: Some(0)
+  attribute :meta, :json, default: Some({ 'shelf' => 'new' })
+  attribute :title, :string, default: None()
+end
+
 class BugTest < Minitest::Test
   def test_optional_attributes
     author = Author.create!(name: 'Cixin Liu')
@@ -790,14 +800,72 @@ class BugTest < Minitest::Test
   def test_update_all_takes_an_option
     note = Note.create!(title: 'Supernova Era')
 
-    Note.where(id: note.id).update_all(title: Some("Death's End"), pinned: Some(false))
+    nudges = capture_stderr do
+      Note.where(id: note.id).update_all(
+        title: Some("Death's End"), pinned: Some(false), meta: Some({ 'isbn' => '9780765377104' }),
+        rank: Some(0), score: Some(1.5), price: Some(2.25)
+      )
+    end
 
+    assert_equal '', nudges
     assert_equal "Death's End", note.reload.title.unwrap!
     assert_equal false, note.pinned.unwrap!
+    assert_equal({ 'isbn' => '9780765377104' }, note.meta.unwrap!)
+    assert_equal 0, note.rank.unwrap!
+    assert_in_delta 1.5, note.score.unwrap!
+    assert_equal BigDecimal('2.25'), note.price.unwrap!
 
-    Note.where(id: note.id).update_all(title: None())
+    Note.where(id: note.id).update_all(title: None(), rank: None(), meta: None())
 
     assert note.reload.title.none?
+    assert note.rank.none?
+    assert note.meta.none?
+  end
+
+  def test_insert_all_takes_an_option
+    nudges = capture_stderr do
+      Note.insert_all([{ title: Some('Supernova Era'), pinned: Some(false), meta: Some(%w[a b]),
+                         rank: Some(3), score: Some(1.5), price: Some(2.25),
+                         created_at: Time.now, updated_at: Time.now }])
+    end
+    note = Note.order(:id).last
+
+    assert_equal '', nudges
+    assert_equal 'Supernova Era', note.title.unwrap!
+    assert_equal false, note.pinned.unwrap!
+    assert_equal %w[a b], note.meta.unwrap!
+    assert_equal 3, note.rank.unwrap!
+    assert_in_delta 1.5, note.score.unwrap!
+    assert_equal BigDecimal('2.25'), note.price.unwrap!
+  end
+
+  def test_upsert_takes_an_option
+    note = Note.create!(title: 'Supernova Era')
+
+    nudges = capture_stderr do
+      Note.upsert({ id: note.id, title: Some("Death's End"), meta: Some({ 'isbn' => '978' }),
+                    rank: Some(0), score: Some(1.5), price: Some(2.25),
+                    created_at: Time.now, updated_at: Time.now })
+    end
+
+    assert_equal '', nudges
+    assert_equal "Death's End", note.reload.title.unwrap!
+    assert_equal({ 'isbn' => '978' }, note.meta.unwrap!)
+    assert_equal 0, note.rank.unwrap!
+    assert_in_delta 1.5, note.score.unwrap!
+    assert_equal BigDecimal('2.25'), note.price.unwrap!
+  end
+
+  # A default is cast on its way into a new record, without passing a writer.
+  def test_an_attribute_default_takes_an_option
+    note = nil
+    nudges = capture_stderr { note = DefaultedNote.new }
+
+    assert_equal '', nudges
+    assert_equal false, note.pinned
+    assert_equal 0, note.rank
+    assert_equal({ 'shelf' => 'new' }, note.meta)
+    assert_nil note.title
   end
 
   # The predicate builder already unwraps a hash condition; unwrapping on
