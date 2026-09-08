@@ -2,6 +2,12 @@
 
 Errgonomic provides some lightweight, opinionated ergonomics for error handling in Ruby. These semantics are a blend of Rails `present?` conventions, and Rust `Option` and `Result` type combinators. Without going full Option and Result. Probably.
 
+## Design
+
+Errgonomic aims at the intersection of two idioms rather than translating one into the other. Rails supplies the mechanism: a concern, an attribute reader overridden with `super`, the reader as the boundary of a model's public surface. Rust supplies the shape of the value: an `Option` you handle with combinators, instead of a value that may or may not be `nil`. Convention over configuration and least surprise are the tests every design choice here has to pass, and where the two idioms already agree we follow the convention and say nothing more about it.
+
+Where the gem leaves one of them, the docs say so and say why. The reason is nearly always mechanical: ActiveRecord assumes things about accessors that a strict Option cannot satisfy. The [ActiveRecord compromises](#activerecord-compromises) are that register, enumerated and closed.
+
 ## Installation
 
 Install the gem and add to the application's Gemfile by executing:

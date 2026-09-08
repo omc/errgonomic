@@ -58,7 +58,7 @@ Comments explain intent and rationale — the *why* behind a non-obvious choice.
 
 ## What we value, in order
 
-When two designs compete, prefer them in this order.
+When two designs compete, prefer them in this order. Before that ordering applies, a design choice has to fit the gem's purpose, which the README's Design section states: the intersection of Rust and Rails idioms, with every deviation from either documented alongside its reason.
 
 1. **Correct.** The code states its behavior and is tested against that statement. Invalid states are made unrepresentable rather than guarded against after the fact. Runtime failures produce diagnostics that tell an operator what went wrong and what to do.
 2. **Simple.** The code reads clearly at the right level of abstraction, and is idiomatic and approachable to another developer. Fewer moving parts, fewer sources of truth.
