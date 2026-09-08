@@ -75,6 +75,7 @@ ActiveRecord::Schema.define do
     t.string :status
     t.string :isbn
     t.integer :pages
+    t.boolean :accepted
     t.references :author
     t.timestamps
   end
@@ -374,6 +375,17 @@ class Manuscript < ActiveRecord::Base
   validates :status, exclusion: { in: %w[withdrawn] }, allow_nil: true
   validates :isbn, length: { maximum: 13 }, format: { with: /\A[0-9]*\z/ }, allow_nil: true
   validates :pages, numericality: { greater_than: 0 }, allow_nil: true
+end
+
+# Validators that weigh a value in other ways: absence asks whether it
+# amounts to nothing, acceptance matches it against a literal, comparison
+# orders it.
+class RetractedManuscript < ActiveRecord::Base
+  self.table_name = 'manuscripts'
+  include Errgonomic::Rails::ActiveRecordOptional
+  validates :status, absence: true
+  validates :accepted, acceptance: true
+  validates :pages, comparison: { greater_than: 0 }, allow_nil: true
 end
 
 # presence and some: ask different questions of the same attribute: whether
@@ -1160,7 +1172,7 @@ class BugTest < Minitest::Test
     refute_predicate SubmittedManuscript.new(title: None()), :valid?
   end
 
-  # Both validators reach the value through to_s, which an Option refuses.
+  # Both validators reach the value through to_s.
   def test_length_and_format_validate_the_value_inside_a_some
     assert_predicate Manuscript.new(isbn: Some('9780765377104')), :valid?
     refute_predicate Manuscript.new(isbn: Some('97807653771049')), :valid?
@@ -1171,7 +1183,53 @@ class BugTest < Minitest::Test
   def test_numericality_validates_the_value_inside_a_some
     assert_predicate Manuscript.new(pages: Some(400)), :valid?
     refute_predicate Manuscript.new(pages: Some(-1)), :valid?
+    refute_predicate Manuscript.new(pages: Some('four hundred')), :valid?
     assert_predicate Manuscript.new(pages: None()), :valid?
+  end
+
+  # An empty string casts away to nil on an integer column, which allow_nil
+  # skips, and wrapping it changes neither step.
+  def test_numericality_gives_an_empty_string_the_same_verdict_wrapped_or_not
+    assert_equal Manuscript.new(pages: '').valid?, Manuscript.new(pages: Some('')).valid?
+  end
+
+  # An application's own validator reads through the same seam, so it is
+  # handed the value like every validator Rails ships.
+  def test_a_custom_validator_receives_the_value_inside_a_some
+    seen = []
+    audited = Class.new(ActiveRecord::Base) do
+      def self.name = 'AuditedManuscript'
+      self.table_name = 'manuscripts'
+      include Errgonomic::Rails::ActiveRecordOptional
+    end
+    audited.validates_each(:title) { |_record, _attribute, value| seen << value }
+
+    audited.new(title: Some('Death\'s End')).valid?
+    audited.new(title: None()).valid?
+
+    assert_equal ["Death's End", nil], seen
+  end
+
+  # An empty string amounts to nothing, which is what absence asks about.
+  def test_absence_weighs_the_value_inside_a_some
+    assert_predicate RetractedManuscript.new(status: Some('')), :valid?
+    refute_predicate RetractedManuscript.new(status: Some('withdrawn')), :valid?
+    assert_predicate RetractedManuscript.new(status: None()), :valid?
+  end
+
+  # Acceptance matches the value against a literal, which no wrapper equals.
+  def test_acceptance_matches_the_value_inside_a_some
+    assert_predicate RetractedManuscript.new(accepted: Some(true)), :valid?
+    refute_predicate RetractedManuscript.new(accepted: Some(false)), :valid?
+    assert_predicate RetractedManuscript.new(accepted: None()), :valid?
+  end
+
+  # Comparison orders the value against a bound, which an Option cannot be
+  # ordered against.
+  def test_comparison_orders_the_value_inside_a_some
+    assert_predicate RetractedManuscript.new(pages: Some(400)), :valid?
+    refute_predicate RetractedManuscript.new(pages: Some(-1)), :valid?
+    assert_predicate RetractedManuscript.new(pages: None()), :valid?
   end
 
   # The presence validation Rails adds for a required belongs_to reads the

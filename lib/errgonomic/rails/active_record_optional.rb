@@ -26,8 +26,10 @@ module Errgonomic
     #    writers on assignment, and the type cast for a value that reaches
     #    the database without passing a writer, as update_all, insert_all,
     #    upsert and an attribute default do.
-    # 4. SomeValidator provides a presence-style validation for Option
-    #    attributes.
+    # 4. SomeValidator asks whether a value is there at all, where presence
+    #    asks whether it amounts to anything: Some("") passes some: true and
+    #    fails presence. It lifts what it is handed, so it asks the same
+    #    question of any model, converted or not.
     # 5. Where ActiveRecord's own machinery reads a value raw, it gets one.
     #    Validation unwraps at read_attribute_for_validation, the seam every
     #    EachValidator fetches an attribute through, so a standard validator
