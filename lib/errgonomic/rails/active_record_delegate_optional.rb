@@ -8,6 +8,18 @@ module Errgonomic
     module ActiveRecordDelegateOptional
       extend ActiveSupport::Concern
 
+      # What a declaration that cannot mean what it says is told, where it is
+      # written. A writer is refused rather than delegated: an assignment
+      # through an absent target has nowhere to put the value, and dropping it
+      # silently is the failure an Option exists to prevent.
+      NO_TARGET = "Delegation needs a target. Supply a keyword argument 'to' " \
+                  '(e.g. delegate_optional :hello, to: :greeter).'
+      NO_WRITERS = 'delegate_optional does not delegate a writer; an absent target would drop the value assigned'
+      NO_NAME_TO_PREFIX = "prefix: true takes the target's own name, and a module target has none; name the prefix"
+      NO_METHOD_TO_PREFIX = 'Can only automatically set the delegation prefix when delegating to a method.'
+      ALWAYS_NONE = 'delegate_optional reads an absent target as None; allow_nil: false asks for something else'
+      private_constant :NO_TARGET, :NO_WRITERS, :NO_NAME_TO_PREFIX, :NO_METHOD_TO_PREFIX, :ALWAYS_NONE
+
       # YARD does not see through a concern's class_methods block, so the
       # method it documents is declared rather than read.
       #
@@ -46,6 +58,18 @@ module Errgonomic
       #     rescue ArgumentError => e
       #       e.message
       #     end.start_with?("Delegation needs a target. Supply a keyword argument 'to'") # => true
+      #   @example a writer is not delegated
+      #     begin
+      #       Class.new(Reprint) { delegate_optional :name=, to: :author }
+      #     rescue ArgumentError => e
+      #       e.message
+      #     end # => 'delegate_optional does not delegate a writer; an absent target would drop the value assigned'
+      #   @example a module target has no name to prefix with
+      #     begin
+      #       Class.new(Reprint) { delegate_optional :name, to: Errgonomic, prefix: true }
+      #     rescue ArgumentError => e
+      #       e.message
+      #     end # => "prefix: true takes the target's own name, and a module target has none; name the prefix"
       #   @example an automatic prefix needs a target it can name a method after
       #     begin
       #       Class.new(Article) { delegate_optional :name, to: :@author, prefix: true }
@@ -112,7 +136,7 @@ module Errgonomic
 
         def delegate_optional(*methods, to: nil, prefix: nil, private: nil, allow_nil: nil)
           declared_at = caller_locations(1, 1).first
-          complaint = delegate_optional_complaint(to, prefix, allow_nil)
+          complaint = delegate_optional_complaint(methods, to, prefix, allow_nil)
           raise ::ArgumentError, complaint if complaint
 
           receiver = delegate_optional_receiver(to)
@@ -152,21 +176,24 @@ module Errgonomic
           "#{prefix == true ? to : prefix}_"
         end
 
-        # A declaration that cannot mean what it says is a mistake where it is
-        # written, rather than a method name nothing can call or a reader that
-        # answers something other than what was asked for. allow_nil: true is
-        # what a delegation does here anyway, so a swap from delegate carries.
-        def delegate_optional_complaint(to, prefix, allow_nil)
-          if to.nil?
-            return "Delegation needs a target. Supply a keyword argument 'to' " \
-                   '(e.g. delegate_optional :hello, to: :greeter).'
-          end
-          if prefix == true && /^[^a-z_]/.match?(to.to_s)
-            return 'Can only automatically set the delegation prefix when delegating to a method.'
-          end
-          return unless allow_nil == false
+        # A mistake is worth more where the declaration is written than as a
+        # method nothing can call. allow_nil: true is what a delegation does
+        # here anyway, so a swap from delegate carries; its opposite does not.
+        def delegate_optional_complaint(methods, to, prefix, allow_nil)
+          return NO_TARGET if to.nil?
+          return NO_WRITERS if methods.any? { |method_name| /\A\w+=\z/.match?(method_name.to_s) }
+          return ALWAYS_NONE if allow_nil == false
 
-          'delegate_optional reads an absent target as None; allow_nil: false asks for something else'
+          delegate_optional_prefix_complaint(to, prefix)
+        end
+
+        # An automatic prefix is the target's own name, so the target needs
+        # one, and one that can start a method name.
+        def delegate_optional_prefix_complaint(to, prefix)
+          return unless prefix == true
+          return NO_NAME_TO_PREFIX if to.is_a?(::Module)
+
+          NO_METHOD_TO_PREFIX if /^[^a-z_]/.match?(to.to_s)
         end
       end
     end
