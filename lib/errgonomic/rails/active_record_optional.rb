@@ -18,9 +18,9 @@ module Errgonomic
     #
     # 1. None#nil? answers true, so AR internals and ordinary nil checks
     #    treat an absent value as absent. Equality does not follow suit:
-    #    None() == nil stays false. Neither does Array#compact, the one
-    #    common nil check that does not consult nil?: it keeps a None,
-    #    where reject(&:none?) drops it.
+    #    None() == nil stays false. Nor does Array#compact, the common
+    #    collection idiom for dropping absent members: it tests for the
+    #    nil object, so it keeps a None where reject(&:none?) drops it.
     # 2. Some delegates persisted? and touch_later to its record, so a Some
     #    can stand in for it where ActiveRecord reads an association back
     #    through its public reader.
