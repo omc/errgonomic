@@ -28,6 +28,8 @@ module Errgonomic
       #     draft.byline_name # => Some('Ursula')
       #     Draft.create!(title: 'Untitled').author_name # => None()
       #     Article.create!(title: 'Untitled').author_name # => None()
+      #   @example a delegated reader points at the model that declared it
+      #     Article.instance_method(:author_name).source_location.first.end_with?('doctest_helper.rb') # => true
       #   @example an absent target is a value here, so allow_nil: true says nothing new
       #     Reprint.create!(title: 'Untitled').author_name # => None()
       #     Reprint.create!(title: 'Untitled').respond_to?(:bio) # => false
@@ -107,12 +109,13 @@ module Errgonomic
         end
 
         def delegate_optional(*methods, to: nil, prefix: nil, private: nil, allow_nil: nil)
+          declared_at = caller_locations(1, 1).first
           complaint = delegate_optional_complaint(to, prefix, allow_nil)
           raise ::ArgumentError, complaint if complaint
 
           methods.each do |method_name|
             reader = "#{delegate_optional_prefix(to, prefix)}#{method_name}"
-            define_optional_delegation(to, method_name, reader)
+            define_optional_delegation(to, method_name, reader, declared_at)
             send(:private, reader) if private
           end
         end
@@ -121,9 +124,11 @@ module Errgonomic
         # a nil or an Option all delegate, and a delegated reader that answers
         # an Option comes back as one Option rather than two. The call is
         # written out rather than sent, so the target's method is reached on
-        # the same terms a caller would reach it on.
-        def define_optional_delegation(to, method_name, reader)
-          class_eval <<-RUBY, __FILE__, __LINE__ + 1
+        # the same terms a caller would reach it on. It is defined against the
+        # declaration's own file and line, so a backtrace and source_location
+        # name the model rather than this generator.
+        def define_optional_delegation(to, method_name, reader, declared_at)
+          class_eval <<-RUBY, declared_at.path, declared_at.lineno # rubocop:disable Style/EvalWithLocation
             def #{reader}(...)
               #{to}.to_option.and_then { |target| target.#{method_name}(...).to_option }
             end

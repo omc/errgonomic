@@ -20,6 +20,7 @@
 - A `delegate_optional` reader forwards what it was called with — positional arguments, keyword arguments and a block — where 0.8.x generated a reader that took no parameters and passed none on, so delegating to a method with any signature at all raised `ArgumentError`. The generated call is written out rather than sent, so a private or protected method on the target no longer delegates
 - `delegate_optional` lifts its target instead of assuming an Option, so a model delegates whether or not it has converted: a plain record reads as `Some`, a nil target as `None`, and a `None` target stays `None`, where 0.8.x raised `NoMethodError` on `map` for anything but an Option. It lifts one layer at each end, so a delegated reader that answers an Option comes back as one Option rather than two
 - `delegate_optional` accepts `allow_nil: true` as a no-op, so a `delegate` declaration swaps over unchanged, and raises `ArgumentError` on `allow_nil: false`, which asks for something a reader answering an Option cannot do. A declaration with no `to:` raises where it is written, with Rails' wording, where 0.8.x returned silently and defined nothing
+- A `delegate_optional` reader is defined against the file and line of the declaration, so a backtrace through it and `instance_method(:reader).source_location` name the model rather than the gem
 - [Dev, Test] - Doctests run against an in-memory ActiveRecord connection, so an `@example` under `lib/errgonomic/rails` specifies the integration the same way every other example specifies the core
 
 ## [0.4.1] - 2025-02-20
