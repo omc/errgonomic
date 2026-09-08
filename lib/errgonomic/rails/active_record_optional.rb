@@ -80,6 +80,22 @@ module Errgonomic
         Errgonomic::Rails.unwrap_option(super)
       end
 
+      # A method named in methods: is read off the record rather than through
+      # the attribute seam, so a wrapped reader named there arrives wrapped.
+      #
+      # @example
+      #   Note.new(title: Some('Wanderer')).serializable_hash(only: [], methods: :title) # => { 'title' => 'Wanderer' }
+      def serializable_hash(options = nil)
+        hash = super
+        return hash if options.nil?
+
+        Array(options[:methods]).each do |name|
+          key = name.to_s
+          hash[key] = Errgonomic::Rails.unwrap_option(hash[key]) if hash.key?(key)
+        end
+        hash
+      end
+
       class_methods do
         # Wrapped readers live in a module of their own, the way ActiveRecord
         # keeps its attribute methods, so a model's own def of the same name
@@ -245,6 +261,18 @@ module Errgonomic
               val.to_option
             end
           RUBY
+        end
+      end
+
+      private
+
+      # ActiveModel reads an included association off the record, so what it
+      # yields is an Option. Take the record out of it, and leave an absent
+      # one out of the payload, where a nil association is already left out.
+      def serializable_add_includes(options = {})
+        super do |association, records, opts|
+          records = Errgonomic::Rails.unwrap_option(records)
+          yield association, records, opts unless records.nil?
         end
       end
     end

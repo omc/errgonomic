@@ -293,6 +293,8 @@ The assignment and cast seams are installed on ActiveModel itself, as the quotin
 
 **Serialization.** A converted model serializes as the unconverted one does. `as_json`, `to_json` and `serializable_hash` fetch every attribute through `read_attribute_for_serialization`, which unwraps, so `Some(v)` writes `v` and `None()` writes `null`. Both idioms agree on the default: Rails writes an absent value as `null`, and so does serde unless a field asks otherwise. The refusal stands everywhere else, so a hand-built Option in an arbitrary payload (`{ isbn: book.isbn }.to_json`) still raises `Errgonomic::SerializeError`.
 
+An association under `include:` follows the same rule: `Some(author)` serializes as the record's own hash, and a `None` leaves the key out, which is what `include:` already does with a `nil` association. A `has_many` is never an Option and is untouched. A wrapped reader named in `methods:` unwraps one layer as well, so `as_json(methods: :isbn)` writes the value; a method that hands back a plain value is unchanged.
+
 `Model.errgonomic_optionals` reports which readers a model wrapped, including nullable foreign-key columns, so `book.author_id` is `Some(1)` alongside `book.author`. That is how to check that a conversion did what it meant to.
 
 - `delegate_optional :name, to: :association` (available on all models) delegates through an optional association, returning an Option instead of raising on nil.

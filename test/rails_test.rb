@@ -600,6 +600,48 @@ class BugTest < Minitest::Test
     assert_equal [PlainBook.find(row.id)].to_json, [SerializedBook.find(row.id)].to_json
   end
 
+  # An included association is fetched through its reader, so a Some
+  # serializes as the record's own hash and a None leaves the key out, which
+  # is what a nil association does on a model that was never converted.
+  def test_an_included_association_serializes_through_the_option
+    author = Author.create!(name: 'Cixin Liu')
+    shelved = Book.create!(title: 'The Dark Forest', author_id: author.id)
+    unshelved = Book.create!(title: 'Supernova Era')
+
+    assert_equal PlainBook.find(shelved.id).as_json(include: :author),
+                 SerializedBook.find(shelved.id).as_json(include: :author)
+    assert_equal 'Cixin Liu', SerializedBook.find(shelved.id).as_json(include: :author).dig('author', 'name')
+
+    assert_equal PlainBook.find(unshelved.id).as_json(include: :author),
+                 SerializedBook.find(unshelved.id).as_json(include: :author)
+    refute_includes SerializedBook.find(unshelved.id).as_json(include: :author), 'author'
+  end
+
+  # A collection is never an Option, so an included has_many is untouched.
+  def test_an_included_has_many_serializes_untouched
+    author = Author.create!(name: 'Cixin Liu')
+    Book.create!(title: 'The Dark Forest', author_id: author.id)
+
+    assert_equal PlainAuthor.find(author.id).as_json(include: :books),
+                 SerializedAuthor.find(author.id).as_json(include: :books)
+    titles = SerializedAuthor.find(author.id).as_json(include: :books)['books'].map { |book| book['title'] }
+
+    assert_equal ['The Dark Forest'], titles
+  end
+
+  # methods: reads its value straight off the record rather than through the
+  # attribute seam, so a wrapped reader named there unwraps one layer and a
+  # method that hands back a plain value is left alone.
+  def test_a_serialized_method_unwraps_one_layer
+    row = Book.create!(title: 'The Dark Forest', isbn: '9780765377104')
+
+    assert_equal PlainBook.find(row.id).as_json(methods: :display_isbn),
+                 SerializedBook.find(row.id).as_json(methods: :display_isbn)
+    assert_equal '9780765377104', SerializedBook.find(row.id).as_json(methods: :isbn)['isbn']
+    assert_equal '9780765377104', SerializedBook.find(row.id).serializable_hash(methods: :isbn)['isbn']
+    assert_nil SerializedBook.create!(title: 'Supernova Era').serializable_hash(methods: :isbn)['isbn']
+  end
+
   # A model that keeps value-or-nil throughout has nothing to unwrap.
   def test_an_opted_out_model_serializes_unchanged
     row = Zine.create!(title: 'Wired', issn: '1059-1028')
