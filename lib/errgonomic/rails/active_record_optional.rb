@@ -441,19 +441,30 @@ module Errgonomic
 
     # Unwrap each value of a hash one layer, where the boundary takes a row
     # or a set of conditions rather than a single value. A nested structure
-    # is the caller's own, and is left as it is.
+    # is the caller's own, and is left as it is. A hash holding no Option is
+    # handed back rather than copied: every write passes here, and most carry
+    # none.
     #
     # @example
     #   Errgonomic::Rails.unwrap_option_values(title: Some('x'), body: None()) # => { title: 'x', body: nil }
+    #   plain = { title: 'x' }
+    #   Errgonomic::Rails.unwrap_option_values(plain).equal?(plain) # => true
     def self.unwrap_option_values(hash)
+      return hash unless hash.each_value.any?(Errgonomic::Option::Any)
+
       hash.transform_values { |value| unwrap_option(value) }
     end
 
     # Unwrap each value of each row, where the boundary takes a list of rows.
+    # A list holding no Option is handed back rather than copied.
     #
     # @example
     #   Errgonomic::Rails.unwrap_option_rows([{ title: Some('x') }]) # => [{ title: 'x' }]
+    #   plain = [{ title: 'x' }]
+    #   Errgonomic::Rails.unwrap_option_rows(plain).equal?(plain) # => true
     def self.unwrap_option_rows(rows)
+      return rows unless rows.any? { |row| row.is_a?(Hash) && row.each_value.any?(Errgonomic::Option::Any) }
+
       rows.map { |row| row.is_a?(Hash) ? unwrap_option_values(row) : row }
     end
 
