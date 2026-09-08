@@ -200,6 +200,16 @@ h.dig(:person, :nickname)     # => None()      (absent)
 
 A member that is not an Option, or not a Result, raises `Errgonomic::TypeMismatchError` in the same pedantic style as `Option#flatten`. It raises regardless of `with_ambiguous_downstream_errors`, which relaxes what a block returned rather than what a caller passed in. A Hash enumerates as pairs, which are Arrays, so `hash.values.sequence_options` is the spelling for a hash of Options.
 
+Three operations over a collection of Options are easy to confuse with one another, so it is worth naming all three:
+
+| Rust | meaning | errgonomic |
+| --- | --- | --- |
+| `iter.flatten()` | drop the absent members | `reject(&:none?)`, `select(&:some?)`, or `flat_map(&:to_a)` to unwrap while dropping |
+| `Option::flatten` | unnest an `Option<Option<T>>` | `Option#flatten` |
+| `collect::<Option<Vec<_>>>()` | all or nothing | `sequence_options`, `sequence_results` |
+
+`Array#compact` is not in that first row. It is implemented in C and tests for the `nil` object rather than asking `nil?`, so it keeps a `None` where the idiom reads as though it drops it, and something downstream then dereferences the wrapper. Use `reject(&:none?)` or `select(&:some?)` to keep the wrappers, `flat_map(&:to_a)` to unwrap in the same pass, and `sequence_options` when an absent member should take the whole collection with it.
+
 ### Booleans
 
 Booleans lift into the containers, following Rust's `bool`: `then_some`, and `ok_or`/`ok_or_else` from nightly. Rust splits the lazy form into `then`, but that name is core Ruby (`Kernel#then`), which Errgonomic will not redefine; `then_some` takes either a value or a block instead. Rust's `ok_or` returns `Result<(), E>`; Ruby has no unit type, so `Ok` carries `true`.
@@ -337,7 +347,7 @@ The declaration reads as well above the include as below it, as `errgonomic_opti
 
 This is the register of where the gem leaves the Rust idiom, and why. ActiveRecord assumes things about accessors that a strict Rust `Option` cannot satisfy, so the integration carries five deliberate compromises, each one forced by a specific piece of ActiveRecord machinery rather than chosen. Everywhere else, treat a departure from Rust's `Option` semantics as a bug; these five are intended:
 
-1. `None#nil?` answers `true`, so ActiveRecord internals and ordinary `.nil?` checks treat an absent value as absent. Equality does not follow suit: `None() == nil` is still `false`.
+1. `None#nil?` answers `true`, so ActiveRecord internals and ordinary `.nil?` checks treat an absent value as absent. Equality does not follow suit: `None() == nil` is still `false`. Neither does `Array#compact`, the one common nil check that does not consult `nil?`: it keeps a `None`, where `reject(&:none?)` drops it.
 2. `Some` delegates `persisted?` and `touch_later` to its record, so a `Some` can stand in for it where ActiveRecord reads an association back through its public reader, as a `belongs_to ..., touch: true` does after a save.
 3. Quoting and the predicate builder are patched so an `Option` passed into `where`/`quote` is unwrapped at the SQL boundary: `Some(v)` binds exactly as `v`, and `None()` as `nil`, so a hash condition asks for `IS NULL`. An array of Options unwraps too. An Option interpolated into raw SQL (`where("id = ?", opt)`) still raises, as it should. Assignment unwraps on the same principle. A singular association writer takes an Option of a record: `book.author = Some(author)` assigns it and `book.author = None()` clears the association, while a `Some` of the wrong class still raises `AssociationTypeMismatch`. An attribute writer takes an Option of a value, for every column type, and unwraps before the attribute is built, so `book.isbn = other.isbn` round-trips and nothing behind the reader ever holds a wrapper. The type cast unwraps on the same terms for a value that reaches the database without passing a writer: `update_all`, `insert_all`, `upsert`, and a default declared with `attribute :isbn, :string, default: Some('unassigned')`. Serialization unwraps alongside it, for `find_by`, which binds its values into a cached statement instead of through the predicate builder.
 4. `SomeValidator` asks whether a value is there at all, where `presence` asks whether it amounts to anything: `Some('')` passes `validates :x, some: true` and fails `presence: true`. It lifts what it is handed, so it asks the same question of any model, converted or not.
