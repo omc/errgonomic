@@ -447,6 +447,38 @@ class ProfiledAuthor < ActiveRecord::Base
   validates :profile, presence: true
 end
 
+# Serialization twins over one row: what a conversion changes about a payload
+# is whatever these two disagree about.
+class SerializedBook < ActiveRecord::Base
+  self.table_name = 'books'
+  include Errgonomic::Rails::ActiveRecordOptional
+  belongs_to :author, optional: true, class_name: 'SerializedAuthor'
+
+  def display_isbn
+    isbn.unwrap_or('unassigned')
+  end
+end
+
+class SerializedAuthor < ActiveRecord::Base
+  self.table_name = 'authors'
+  include Errgonomic::Rails::ActiveRecordOptional
+  has_many :books, class_name: 'SerializedBook', foreign_key: :author_id
+end
+
+class PlainBook < ActiveRecord::Base
+  self.table_name = 'books'
+  belongs_to :author, optional: true, class_name: 'PlainAuthor'
+
+  def display_isbn
+    isbn || 'unassigned'
+  end
+end
+
+class PlainAuthor < ActiveRecord::Base
+  self.table_name = 'authors'
+  has_many :books, class_name: 'PlainBook', foreign_key: :author_id
+end
+
 class BugTest < Minitest::Test
   def test_optional_attributes
     author = Author.create!(name: 'Cixin Liu')
@@ -536,6 +568,43 @@ class BugTest < Minitest::Test
     assert_raises(Errgonomic::SerializeError) { Ok(5).as_json }
     assert_raises(Errgonomic::SerializeError) { { a: Err(5) }.to_json }
     assert_raises(Errgonomic::SerializeError) { [Ok(5)].to_json }
+  end
+
+  # A conversion changes what a reader returns, not what a record serializes:
+  # the payload has to match the model that was never converted, key for key.
+  def test_a_converted_record_serializes_as_the_unconverted_one_does
+    author = Author.create!(name: 'Cixin Liu')
+    row = Book.create!(title: 'The Dark Forest', isbn: '9780765377104', author_id: author.id)
+
+    assert_equal PlainBook.find(row.id).serializable_hash, SerializedBook.find(row.id).serializable_hash
+    assert_equal PlainBook.find(row.id).as_json, SerializedBook.find(row.id).as_json
+    assert_equal PlainBook.find(row.id).to_json, SerializedBook.find(row.id).to_json
+  end
+
+  # Rails writes an absent value as null, and so does serde unless a field
+  # asks otherwise, so a None does too and no declaration is needed to say so.
+  def test_a_none_serializes_as_null
+    row = Book.create!(title: 'Supernova Era')
+
+    assert_equal PlainBook.find(row.id).as_json, SerializedBook.find(row.id).as_json
+    assert_nil SerializedBook.find(row.id).as_json['isbn']
+    assert_includes SerializedBook.find(row.id).to_json, '"isbn":null'
+  end
+
+  # ActiveSupport recurses through as_json, so a record inside an ordinary
+  # payload serializes the way the record itself does.
+  def test_a_converted_record_serializes_inside_a_payload
+    row = Book.create!(title: 'The Dark Forest')
+
+    assert_equal({ book: PlainBook.find(row.id) }.to_json, { book: SerializedBook.find(row.id) }.to_json)
+    assert_equal [PlainBook.find(row.id)].to_json, [SerializedBook.find(row.id)].to_json
+  end
+
+  # A model that keeps value-or-nil throughout has nothing to unwrap.
+  def test_an_opted_out_model_serializes_unchanged
+    row = Zine.create!(title: 'Wired', issn: '1059-1028')
+
+    assert_equal VendorLedger.find(row.id).as_json, PlainZine.find(row.id).as_json
   end
 
   # to_option lifts a value that may be nil. An Option is already lifted, and

@@ -33,11 +33,13 @@ module Errgonomic
     #    question of any model, converted or not.
     # 5. Where ActiveRecord's own machinery reads a value raw, it gets one.
     #    Validation unwraps at read_attribute_for_validation, the seam every
-    #    EachValidator fetches an attribute through, so a standard validator
-    #    weighs the value rather than the wrapper. A singular association with
-    #    nested attributes goes further and keeps its plain reader: nested
-    #    attributes are assigned through the reader, and ActiveRecord asks
-    #    whatever it finds there whether it is a new record.
+    #    EachValidator fetches an attribute through, and serialization at
+    #    read_attribute_for_serialization, the seam every attribute in a
+    #    payload is fetched through, so a standard validator weighs the value
+    #    and a payload carries it rather than the wrapper. A singular
+    #    association with nested attributes goes further and keeps its plain
+    #    reader: nested attributes are assigned through the reader, and
+    #    ActiveRecord asks whatever it finds there whether it is a new record.
     #
     # errgonomic_optional_except is not on the list: it is configuration, an
     # escape hatch for whatever conflict shows up next, not a semantic
@@ -63,6 +65,18 @@ module Errgonomic
       #   Memo.new(title: Some(''), body: Some('')).tap(&:valid?).errors[:title] # => ["can't be blank"]
       #   Memo.new(title: Some(''), body: Some('')).tap(&:valid?).errors[:body] # => []
       def read_attribute_for_validation(key)
+        Errgonomic::Rails.unwrap_option(super)
+      end
+
+      # Every attribute in a serialized payload is fetched through here, so a
+      # converted model's as_json, to_json and serializable_hash say what the
+      # unconverted one says. Rails writes an absent value as null, and so
+      # does serde unless a field asks otherwise, so a None does too.
+      #
+      # @example
+      #   Note.new(title: Some('The Dark Forest')).as_json['title'] # => 'The Dark Forest'
+      #   Note.new.as_json['title'] # => nil
+      def read_attribute_for_serialization(key)
         Errgonomic::Rails.unwrap_option(super)
       end
 
