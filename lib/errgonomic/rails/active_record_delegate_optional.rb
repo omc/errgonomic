@@ -17,6 +17,11 @@ module Errgonomic
       #     article.author_name # => Some('Ursula')
       #     article.writer_name # => Some('Ursula')
       #     article.bio # => Some('writes')
+      #   @example a delegated call forwards what it was handed
+      #     article = Article.create!(title: 'Omelas', author: Author.create!(name: 'Ursula'))
+      #     article.author_greeting('Hello') # => Some('Hello, Ursula.')
+      #     article.author_greeting('Hi', punctuation: '!') # => Some('Hi, Ursula!')
+      #     article.author_styled_name(&:upcase) # => Some('URSULA')
       #   @example an automatic prefix needs a target it can name a method after
       #     begin
       #       Class.new(Article) { delegate_optional :name, to: :@author, prefix: true }
@@ -94,10 +99,12 @@ module Errgonomic
           end
         end
 
+        # The call is written out rather than sent, so the target's method is
+        # reached on the same terms a caller would reach it on.
         def define_optional_delegation(to, method_name, reader)
           class_eval <<-RUBY, __FILE__, __LINE__ + 1
-            def #{reader}
-              #{to}.map { |obj| obj.send(:#{method_name}) }
+            def #{reader}(...)
+              #{to}.map { |target| target.#{method_name}(...) }
             end
           RUBY
         end

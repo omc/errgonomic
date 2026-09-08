@@ -43,8 +43,16 @@ class Note < ActiveRecord::Base
   include Errgonomic::Rails::ActiveRecordOptional
 end
 
-# An unconverted delegation target: its readers hand back plain values.
+# An unconverted delegation target: its readers hand back plain values, and
+# two of its methods take an argument, a keyword and a block.
 class Author < ActiveRecord::Base
+  def greeting(salutation, punctuation: '.')
+    "#{salutation}, #{name}#{punctuation}"
+  end
+
+  def styled_name
+    yield(name)
+  end
 end
 
 # A converted model reads its association as an Option.
@@ -54,6 +62,7 @@ class Article < ActiveRecord::Base
   delegate_optional :name, to: :author, prefix: true
   delegate_optional :name, to: :author, prefix: :writer
   delegate_optional :bio, to: :author
+  delegate_optional :greeting, :styled_name, to: :author, prefix: true
 end
 
 # Two validators that answer differently for the same wrapped value.
