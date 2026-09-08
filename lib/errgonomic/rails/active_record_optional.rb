@@ -355,6 +355,18 @@ module Errgonomic
         value
       end
     end
+
+    # Take the value inside an Option, and a None as nil, where the boundary
+    # takes one value: an attribute is a single typed field, so a collection
+    # that happens to hold an Option is that collection.
+    #
+    # @example
+    #   Errgonomic::Rails.unwrap_option(Some(1)) # => 1
+    #   Errgonomic::Rails.unwrap_option(None()) # => nil
+    #   Errgonomic::Rails.unwrap_option([Some(1)]) # => [Some(1)]
+    def self.unwrap_option(value)
+      value.is_a?(Errgonomic::Option::Any) ? value.unwrap_or(nil) : value
+    end
   end
 end
 
@@ -397,7 +409,7 @@ module Errgonomic
       #   Note.new(pinned: Some(false)).attributes['pinned'] # => false
       #   Note.new(pinned: Some(false)).read_attribute_before_type_cast('pinned') # => false
       def write_from_user(name, value)
-        super(name, Errgonomic::Rails.unwrap_options(value))
+        super(name, Errgonomic::Rails.unwrap_option(value))
       end
     end
   end
@@ -420,7 +432,7 @@ module Errgonomic
       #   ActiveModel::Type::Integer.new.cast(None()) # => nil
       #   ActiveModel::Type::Integer.new.cast(Some(3)) # => 3
       def cast(value)
-        super(Errgonomic::Rails.unwrap_options(value))
+        super(Errgonomic::Rails.unwrap_option(value))
       end
     end
 
@@ -434,7 +446,7 @@ module Errgonomic
       #   ActiveModel::Type::Integer.new.cast(Some(0)) # => 0
       #   ActiveRecord::Type::Json.new.cast(Some({ 'a' => 1 })) # => { 'a' => 1 }
       def cast(value)
-        super(Errgonomic::Rails.unwrap_options(value))
+        super(Errgonomic::Rails.unwrap_option(value))
       end
     end
   end

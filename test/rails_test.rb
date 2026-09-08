@@ -856,6 +856,16 @@ class BugTest < Minitest::Test
     assert_equal BigDecimal('2.25'), note.price.unwrap!
   end
 
+  # An attribute takes one value, and an Option of one is that value. An
+  # Option inside a collection is a different shape, and stays where it is.
+  def test_only_a_top_level_option_is_unwrapped_on_assignment
+    note = Note.create!(meta: Some([1, 2]))
+
+    assert_equal [1, 2], note.reload.meta.unwrap!
+
+    assert_raises(Errgonomic::SerializeError) { note.update!(meta: [Some(1), 2]) }
+  end
+
   # A default is cast on its way into a new record, without passing a writer.
   def test_an_attribute_default_takes_an_option
     note = nil
