@@ -3,6 +3,7 @@
 require 'active_record'
 require 'minitest/autorun'
 require 'logger'
+require 'stringio'
 
 require_relative '../lib/errgonomic/rails'
 
@@ -65,6 +66,32 @@ ActiveRecord::Schema.define do
   create_table 'credentials', force: :cascade do |t|
     t.string :access_key, limit: 255
     t.string :access_secret, limit: 255
+    t.string :access_token, limit: 255
+    t.string :handle, limit: 255
+    t.timestamps
+  end
+
+  create_table 'manuscripts', force: :cascade do |t|
+    t.string :title
+    t.string :currency
+    t.string :status
+    t.string :isbn
+    t.integer :pages
+    t.boolean :accepted
+    t.references :author
+    t.timestamps
+  end
+
+  create_table 'notes', force: :cascade do |t|
+    t.boolean :pinned
+    t.string :title
+    t.text :body
+    t.json :meta
+    t.integer :rank
+    t.float :score
+    t.decimal :price
+    t.date :due_on
+    t.datetime :read_at
     t.timestamps
   end
 end
@@ -153,11 +180,14 @@ class LoopyAuthor < ActiveRecord::Base
   include Errgonomic::Rails::ActiveRecordOptional
 end
 
-# Encryption adds a length validator that reads the raw attribute, and
-# declares itself after the concern is included, as applications write it.
+# Encryption surrounds an attribute with machinery of its own, and declares
+# itself after the concern is included, as applications write it. A
+# deterministic attribute is queryable, and downcase: normalizes it on write.
 class Credential < ActiveRecord::Base
   include Errgonomic::Rails::ActiveRecordOptional
   encrypts :access_secret
+  encrypts :access_token, deterministic: true
+  encrypts :handle, deterministic: true, downcase: true
 end
 
 # Nested attributes are assigned through the public reader, and ActiveRecord
@@ -200,6 +230,28 @@ class OptedOutBook < ActiveRecord::Base
   errgonomic_optional_except :author
   belongs_to :author, optional: true
   include Errgonomic::Rails::ActiveRecordOptional
+end
+
+# touch: and dependent: reach the associated record after a save or a
+# destroy, and a wrapped reader is what they find it through.
+class TouchingBook < ActiveRecord::Base
+  self.table_name = 'books'
+  include Errgonomic::Rails::ActiveRecordOptional
+  belongs_to :author, optional: true, touch: true
+end
+
+class DependentBook < ActiveRecord::Base
+  self.table_name = 'books'
+  include Errgonomic::Rails::ActiveRecordOptional
+  belongs_to :author, optional: true, dependent: :destroy
+end
+
+# An autosaved has_one is destroyed with its parent once it is marked, along
+# a path that reads the association's own target rather than the reader.
+class CuratedAuthor < ActiveRecord::Base
+  self.table_name = 'authors'
+  include Errgonomic::Rails::ActiveRecordOptional
+  has_one :profile, foreign_key: :author_id, autosave: true
 end
 
 # A subclass has its own schema state, so it reaches the wrapping seam a
@@ -326,6 +378,152 @@ class TrimmedBook < ActiveRecord::Base
   include Errgonomic::Rails::ActiveRecordOptional
 end
 
+# One nullable column per type an attribute writer has to cast, so what an
+# Option stores can be compared against what its inner value stores.
+class Note < ActiveRecord::Base
+  include Errgonomic::Rails::ActiveRecordOptional
+end
+
+# A declared default is cast on its way into a new record rather than
+# assigned through a writer.
+class DefaultedNote < ActiveRecord::Base
+  self.table_name = 'notes'
+  attribute :pinned, :boolean, default: Some(false)
+  attribute :rank, :integer, default: Some(0)
+  attribute :meta, :json, default: Some({ 'shelf' => 'new' })
+  attribute :title, :string, default: None()
+end
+
+# A converted model carrying one validator family per wrapped column, so
+# each is asked what it makes of a Some and of a None.
+class Manuscript < ActiveRecord::Base
+  include Errgonomic::Rails::ActiveRecordOptional
+  validates :currency, inclusion: { in: %w[USD EUR] }, allow_nil: true
+  validates :status, exclusion: { in: %w[withdrawn] }, allow_nil: true
+  validates :isbn, length: { maximum: 13 }, format: { with: /\A[0-9]*\z/ }, allow_nil: true
+  validates :pages, numericality: { greater_than: 0 }, allow_nil: true
+end
+
+# Validators that weigh a value in other ways: absence asks whether it
+# amounts to nothing, acceptance matches it against a literal, comparison
+# orders it.
+class RetractedManuscript < ActiveRecord::Base
+  self.table_name = 'manuscripts'
+  include Errgonomic::Rails::ActiveRecordOptional
+  validates :status, absence: true
+  validates :accepted, acceptance: true
+  validates :pages, comparison: { greater_than: 0 }, allow_nil: true
+end
+
+# presence and some: ask different questions of the same attribute: whether
+# the value amounts to anything, and whether it is there at all.
+class SubmittedManuscript < ActiveRecord::Base
+  self.table_name = 'manuscripts'
+  include Errgonomic::Rails::ActiveRecordOptional
+  validates :title, presence: true, some: true
+end
+
+# some: is available on any model, so it has to answer for a plain value too.
+class PlainManuscript < ActiveRecord::Base
+  self.table_name = 'manuscripts'
+  validates :title, some: true
+end
+
+# A belongs_to without optional: true is required, and Rails validates it
+# with a presence validation of its own.
+class AttributedManuscript < ActiveRecord::Base
+  self.table_name = 'manuscripts'
+  self.belongs_to_required_by_default = true
+  include Errgonomic::Rails::ActiveRecordOptional
+  belongs_to :author
+end
+
+# A wrapped has_one validated for presence, the association side of the same
+# seam.
+class ProfiledAuthor < ActiveRecord::Base
+  self.table_name = 'authors'
+  include Errgonomic::Rails::ActiveRecordOptional
+  has_one :profile, foreign_key: :author_id
+  validates :profile, presence: true
+end
+
+# Serialization twins over one row: what a conversion changes about a payload
+# is whatever these two disagree about.
+class SerializedBook < ActiveRecord::Base
+  self.table_name = 'books'
+  include Errgonomic::Rails::ActiveRecordOptional
+  belongs_to :author, optional: true, class_name: 'SerializedAuthor'
+
+  def display_isbn
+    isbn.unwrap_or('unassigned')
+  end
+end
+
+class SerializedAuthor < ActiveRecord::Base
+  self.table_name = 'authors'
+  include Errgonomic::Rails::ActiveRecordOptional
+  has_many :books, class_name: 'SerializedBook', foreign_key: :author_id
+end
+
+class PlainBook < ActiveRecord::Base
+  self.table_name = 'books'
+  belongs_to :author, optional: true, class_name: 'PlainAuthor'
+
+  def display_isbn
+    isbn || 'unassigned'
+  end
+end
+
+class PlainAuthor < ActiveRecord::Base
+  self.table_name = 'authors'
+  has_many :books, class_name: 'PlainBook', foreign_key: :author_id
+end
+
+# Omission is the opt-in, and an application's own base class is where it is
+# declared once for every model below.
+class TerseRecord < ActiveRecord::Base
+  self.abstract_class = true
+  include Errgonomic::Rails::ActiveRecordOptional
+  errgonomic_serialize_none :omit
+end
+
+class TerseBook < TerseRecord
+  self.table_name = 'books'
+  belongs_to :author, optional: true, class_name: 'SerializedAuthor'
+
+  # A plain method is not a reader a declaration governs, whatever it answers.
+  def blurb
+    nil
+  end
+end
+
+# A model below the declaration names the other mode, and gets what a model
+# with no declaration anywhere gets.
+class VerboseBook < TerseRecord
+  self.table_name = 'books'
+  errgonomic_serialize_none :null
+end
+
+# only: and except: scope the mode to named readers, and a reader outside the
+# scope keeps the default.
+class SelectiveBook < TerseRecord
+  self.table_name = 'books'
+  errgonomic_serialize_none :omit, only: %i[isbn]
+end
+
+class ExceptedBook < TerseRecord
+  self.table_name = 'books'
+  errgonomic_serialize_none :omit, except: %i[isbn]
+end
+
+# Rails convention puts a concern at the top of a model, but configuration
+# reads as well above the include as below it, so it has to work either way.
+class EarlyTerseBook < ActiveRecord::Base
+  self.table_name = 'books'
+  errgonomic_serialize_none :omit
+  include Errgonomic::Rails::ActiveRecordOptional
+end
+
 class BugTest < Minitest::Test
   def test_optional_attributes
     author = Author.create!(name: 'Cixin Liu')
@@ -376,6 +574,16 @@ class BugTest < Minitest::Test
 
   # A None reads as absent, which for a hash condition means IS NULL rather
   # than an = NULL that can never match.
+  # find_by binds its values outside the predicate builder, so an Option
+  # reaches the column type rather than the quoting seam. A regression guard:
+  # both of these hold today, and the serialize boundary has to keep them.
+  def test_find_by_takes_an_option_on_a_string_or_integer_column
+    note = Note.create!(title: 'Ball Lightning', rank: 987)
+
+    assert_equal note.id, Note.find_by(title: Some('Ball Lightning')).id
+    assert_equal note.id, Note.find_by(rank: Some(987)).id
+  end
+
   def test_where_with_a_none_asks_for_null
     unshelved = Book.create!(title: 'Ball Lightning')
 
@@ -398,6 +606,7 @@ class BugTest < Minitest::Test
   # Hash and Array serialization recurses with as_json, never to_json, so
   # the refusal has to sit on as_json to survive nesting.
   def test_nested_options_and_results_refuse_to_serialize
+    assert_raises(Errgonomic::SerializeError) { Some(5).to_json }
     assert_raises(Errgonomic::SerializeError) { Some(5).as_json }
     assert_raises(Errgonomic::SerializeError) { { a: Some(5) }.to_json }
     assert_raises(Errgonomic::SerializeError) { { a: None() }.to_json }
@@ -405,6 +614,174 @@ class BugTest < Minitest::Test
     assert_raises(Errgonomic::SerializeError) { Ok(5).as_json }
     assert_raises(Errgonomic::SerializeError) { { a: Err(5) }.to_json }
     assert_raises(Errgonomic::SerializeError) { [Ok(5)].to_json }
+  end
+
+  # A conversion changes what a reader returns, not what a record serializes:
+  # the payload has to match the model that was never converted, key for key.
+  def test_a_converted_record_serializes_as_the_unconverted_one_does
+    author = Author.create!(name: 'Cixin Liu')
+    row = Book.create!(title: 'The Dark Forest', isbn: '9780765377104', author_id: author.id)
+
+    assert_equal PlainBook.find(row.id).serializable_hash, SerializedBook.find(row.id).serializable_hash
+    assert_equal PlainBook.find(row.id).as_json, SerializedBook.find(row.id).as_json
+    assert_equal PlainBook.find(row.id).to_json, SerializedBook.find(row.id).to_json
+  end
+
+  # Rails writes an absent value as null, and so does serde unless a field
+  # asks otherwise, so a None does too and no declaration is needed to say so.
+  def test_a_none_serializes_as_null
+    row = Book.create!(title: 'Supernova Era')
+
+    assert_equal PlainBook.find(row.id).as_json, SerializedBook.find(row.id).as_json
+    assert_nil SerializedBook.find(row.id).as_json['isbn']
+    assert_includes SerializedBook.find(row.id).to_json, '"isbn":null'
+  end
+
+  # ActiveSupport recurses through as_json, so a record inside an ordinary
+  # payload serializes the way the record itself does.
+  def test_a_converted_record_serializes_inside_a_payload
+    row = Book.create!(title: 'The Dark Forest')
+
+    assert_equal({ book: PlainBook.find(row.id) }.to_json, { book: SerializedBook.find(row.id) }.to_json)
+    assert_equal [PlainBook.find(row.id)].to_json, [SerializedBook.find(row.id)].to_json
+  end
+
+  # An included association is fetched through its reader, so a Some
+  # serializes as the record's own hash and a None leaves the key out, which
+  # is what a nil association does on a model that was never converted.
+  def test_an_included_association_serializes_through_the_option
+    author = Author.create!(name: 'Cixin Liu')
+    shelved = Book.create!(title: 'The Dark Forest', author_id: author.id)
+    unshelved = Book.create!(title: 'Supernova Era')
+
+    assert_equal PlainBook.find(shelved.id).as_json(include: :author),
+                 SerializedBook.find(shelved.id).as_json(include: :author)
+    assert_equal 'Cixin Liu', SerializedBook.find(shelved.id).as_json(include: :author).dig('author', 'name')
+
+    assert_equal PlainBook.find(unshelved.id).as_json(include: :author),
+                 SerializedBook.find(unshelved.id).as_json(include: :author)
+    refute_includes SerializedBook.find(unshelved.id).as_json(include: :author), 'author'
+  end
+
+  # A collection is never an Option, so an included has_many is untouched.
+  def test_an_included_has_many_serializes_untouched
+    author = Author.create!(name: 'Cixin Liu')
+    Book.create!(title: 'The Dark Forest', author_id: author.id)
+
+    assert_equal PlainAuthor.find(author.id).as_json(include: :books),
+                 SerializedAuthor.find(author.id).as_json(include: :books)
+    titles = SerializedAuthor.find(author.id).as_json(include: :books)['books'].map { |book| book['title'] }
+
+    assert_equal ['The Dark Forest'], titles
+  end
+
+  # methods: reads its value straight off the record rather than through the
+  # attribute seam, so a wrapped reader named there unwraps one layer and a
+  # method that hands back a plain value is left alone.
+  def test_a_serialized_method_unwraps_one_layer
+    row = Book.create!(title: 'The Dark Forest', isbn: '9780765377104')
+
+    assert_equal PlainBook.find(row.id).as_json(methods: :display_isbn),
+                 SerializedBook.find(row.id).as_json(methods: :display_isbn)
+    assert_equal '9780765377104', SerializedBook.find(row.id).as_json(methods: :isbn)['isbn']
+    assert_equal '9780765377104', SerializedBook.find(row.id).serializable_hash(methods: :isbn)['isbn']
+    assert_nil SerializedBook.create!(title: 'Supernova Era').serializable_hash(methods: :isbn)['isbn']
+  end
+
+  # Omission is the opt-in, and it drops only the keys the record has no
+  # value for: a Some is a value like any other.
+  def test_omit_drops_the_keys_a_record_has_no_value_for
+    absent = TerseBook.find(Book.create!(title: 'Supernova Era').id).as_json
+    present = TerseBook.find(Book.create!(title: 'The Dark Forest', isbn: '9780765377104').id).as_json
+
+    refute_includes absent, 'isbn'
+    refute_includes absent, 'published_at'
+    assert_equal 'Supernova Era', absent['title']
+
+    assert_equal '9780765377104', present['isbn']
+    refute_includes present, 'published_at'
+  end
+
+  # A declaration above the include says the same thing as one below it.
+  def test_serialize_none_is_declared_on_either_side_of_the_include
+    hash = EarlyTerseBook.find(Book.create!(title: 'Supernova Era').id).as_json
+
+    refute_includes hash, 'isbn'
+    assert_equal 'Supernova Era', hash['title']
+  end
+
+  # Omission governs by reader name wherever the key came from, so a methods:
+  # entry naming a wrapped reader goes the way the reader does.
+  def test_omit_governs_a_method_entry_by_reader_name
+    hash = TerseBook.find(Book.create!(title: 'Supernova Era').id).as_json(methods: %i[isbn blurb])
+
+    refute_includes hash, 'isbn'
+    assert_nil hash.fetch('blurb')
+  end
+
+  # A model below the declaration says :null and is back to the default.
+  def test_a_subclass_declares_its_way_back_to_null
+    row = Book.create!(title: 'Supernova Era')
+
+    assert_equal PlainBook.find(row.id).as_json, VerboseBook.find(row.id).as_json
+  end
+
+  # A scoped declaration replaces the one it inherits, so a reader it does
+  # not name keeps the default rather than the mode above it.
+  def test_omit_scoped_to_named_readers
+    row = Book.create!(title: 'Supernova Era')
+    only = SelectiveBook.find(row.id).as_json
+    except = ExceptedBook.find(row.id).as_json
+
+    refute_includes only, 'isbn'
+    assert_nil only.fetch('published_at')
+
+    assert_nil except.fetch('isbn')
+    refute_includes except, 'published_at'
+  end
+
+  # An absent association is left out of a payload either way, and a present
+  # one is its record's hash either way.
+  def test_omit_leaves_an_absent_association_out
+    author = Author.create!(name: 'Cixin Liu')
+    shelved = Book.create!(title: 'The Dark Forest', author_id: author.id)
+    unshelved = Book.create!(title: 'Supernova Era')
+
+    refute_includes TerseBook.find(unshelved.id).as_json(include: :author), 'author'
+    assert_equal 'Cixin Liu', TerseBook.find(shelved.id).as_json(include: :author).dig('author', 'name')
+  end
+
+  # A mode the concern does not know would be a silent no-op, so it is
+  # refused where it is written.
+  def test_an_unknown_serialize_none_mode_is_refused
+    error = assert_raises(ArgumentError) { declare_serialize_none(:skip) }
+
+    assert_match(/:null or :omit/, error.message)
+  end
+
+  # Two scopes in one declaration cannot both be the set it applies to.
+  def test_only_and_except_together_are_refused
+    error = assert_raises(ArgumentError) { declare_serialize_none(:omit, only: %i[isbn], except: %i[genre_id]) }
+
+    assert_match(/not both/, error.message)
+  end
+
+  # A declaration replaces the one it inherits, so a scoped :null asks for
+  # the default on the readers it names and the default on the rest, which
+  # is no request at all.
+  def test_a_scoped_null_is_refused
+    only = assert_raises(ArgumentError) { declare_serialize_none(:null, only: %i[isbn]) }
+    except = assert_raises(ArgumentError) { declare_serialize_none(:null, except: %i[isbn]) }
+
+    assert_match(/declare :omit/, only.message)
+    assert_match(/declare :omit/, except.message)
+  end
+
+  # A model that keeps value-or-nil throughout has nothing to unwrap.
+  def test_an_opted_out_model_serializes_unchanged
+    row = Zine.create!(title: 'Wired', issn: '1059-1028')
+
+    assert_equal VendorLedger.find(row.id).as_json, PlainZine.find(row.id).as_json
   end
 
   # to_option lifts a value that may be nil. An Option is already lifted, and
@@ -454,18 +831,46 @@ class BugTest < Minitest::Test
     assert_equal 'Fiction', scifi.send(:parent_name).unwrap!
   end
 
-  def test_encrypted_attributes_are_left_unwrapped
+  # An encrypted attribute is a nullable column like any other, and the
+  # ciphertext never reaches the reader.
+  def test_an_encrypted_attribute_round_trips_as_an_option
     credential = Credential.create!(access_key: 'abc123', access_secret: 'shhh')
 
-    assert_equal 'shhh', credential.access_secret
+    assert_equal 'shhh', credential.reload.access_secret.unwrap!
+
+    credential.access_secret = Some('rotated')
+    credential.save!
+
+    assert_equal 'rotated', credential.reload.access_secret.unwrap!
     assert_equal 'abc123', credential.access_key.unwrap!
   end
 
-  def test_encrypted_attributes_may_be_absent
+  def test_an_absent_encrypted_attribute_reads_as_none
     credential = Credential.create!(access_key: 'abc123')
 
-    assert_nil credential.access_secret
-    assert credential.reload.access_secret.nil?
+    assert credential.access_secret.none?
+    assert credential.reload.access_secret.none?
+  end
+
+  # A deterministic attribute encrypts to a stable ciphertext, so a query
+  # against it has to reach the same value the writer stored.
+  def test_a_deterministic_encrypted_attribute_is_queryable
+    credential = Credential.create!(access_key: 'abc123', access_token: 'tok-42')
+
+    assert_equal 'tok-42', credential.reload.access_token.unwrap!
+    assert_equal credential.id, Credential.find_by(access_token: 'tok-42').id
+    assert_equal credential.id, Credential.where(access_token: Some('tok-42')).first.id
+    assert_equal credential.id, Credential.find_by(access_token: Some('tok-42')).id
+    assert_nil Credential.find_by(access_token: 'tok-43')
+  end
+
+  # downcase: normalizes on the way in, so what was written mixed-case reads
+  # back and matches lowercase.
+  def test_a_downcased_encrypted_attribute_normalizes_on_write
+    credential = Credential.create!(access_key: 'abc123', handle: Some('MixedCase'))
+
+    assert_equal 'mixedcase', credential.reload.handle.unwrap!
+    assert_equal credential.id, Credential.find_by(handle: 'MIXEDCASE').id
   end
 
   # ActiveRecord loads a model's schema on first use, not at definition, so a
@@ -528,6 +933,36 @@ class BugTest < Minitest::Test
     assert_equal 'writes sci-fi', author.reload.profile.unwrap!.tagline
 
     author.destroy!
+
+    assert_equal 0, Profile.where(author_id: author.id).count
+  end
+
+  # touch: reads the associated record back through the public reader and
+  # asks it to touch itself.
+  def test_a_touching_belongs_to_reaches_the_record_inside_the_option
+    author = Author.create!(name: 'Cixin Liu')
+    Author.where(id: author.id).update_all(updated_at: Time.at(0))
+
+    TouchingBook.create!(title: 'The Dark Forest', author: Some(author))
+
+    assert_operator author.reload.updated_at, :>, Time.at(0)
+  end
+
+  def test_a_dependent_belongs_to_destroys_the_record_inside_the_option
+    author = Author.create!(name: 'Cixin Liu')
+    book = DependentBook.create!(title: 'The Dark Forest', author: Some(author))
+
+    book.destroy!
+
+    assert_nil Author.find_by(id: author.id)
+  end
+
+  # Marking the record a wrapped reader hands back still reaches the save.
+  def test_an_autosaved_has_one_marked_for_destruction_is_destroyed
+    author = CuratedAuthor.create!(name: 'Cixin Liu')
+    author.create_profile!(tagline: 'writes sci-fi')
+    author.profile.unwrap!.mark_for_destruction
+    author.save!
 
     assert_equal 0, Profile.where(author_id: author.id).count
   end
@@ -643,6 +1078,219 @@ class BugTest < Minitest::Test
     other_book.save!
 
     assert_equal author, other_book.reload.author.unwrap!
+  end
+
+  # An Option assigned through an attribute writer stores what its inner
+  # value stores. Boolean is the type with the sharpest edge: a Some is
+  # truthy and is not one of ActiveModel's FALSE_VALUES, so a cast that saw
+  # the wrapper would read a wrapped false as true.
+  def test_a_boolean_writer_takes_an_option
+    note = Note.create!(pinned: Some(false))
+
+    assert_equal false, note.reload.pinned.unwrap!
+
+    note.update!(pinned: Some(true))
+
+    assert_equal true, note.reload.pinned.unwrap!
+
+    note.update!(pinned: None())
+
+    assert note.reload.pinned.none?
+  end
+
+  def test_a_string_writer_takes_an_option
+    note = Note.create!(title: Some('The Dark Forest'), body: Some('a novel'))
+
+    assert_equal 'The Dark Forest', note.reload.title.unwrap!
+    assert_equal 'a novel', note.body.unwrap!
+
+    note.update!(title: Some(''), body: None())
+
+    assert_equal '', note.reload.title.unwrap!
+    assert note.body.none?
+  end
+
+  def test_a_json_writer_takes_an_option
+    note = Note.create!(meta: Some({ 'isbn' => '9780765377104' }))
+
+    assert_equal({ 'isbn' => '9780765377104' }, note.reload.meta.unwrap!)
+
+    note.update!(meta: None())
+
+    assert note.reload.meta.none?
+  end
+
+  # A numeric writer reaches its value without Option#presence, which is
+  # soft-deprecated and nudges on stderr on every call.
+  def test_a_numeric_writer_takes_an_option_without_a_deprecation_nudge
+    note = nil
+    nudges = capture_stderr do
+      note = Note.create!(rank: Some(0), score: Some(0.0), price: Some(0))
+    end
+
+    assert_equal '', nudges
+    assert_equal 0, note.reload.rank.unwrap!
+    assert_in_delta 0.0, note.score.unwrap!
+    assert_equal 0, note.price.unwrap!
+
+    note.update!(rank: Some(3), score: Some(1.5), price: Some(2.25))
+
+    assert_equal 3, note.reload.rank.unwrap!
+    assert_in_delta 1.5, note.score.unwrap!
+    assert_equal BigDecimal('2.25'), note.price.unwrap!
+
+    note.update!(rank: None(), score: None(), price: None())
+
+    assert note.reload.rank.none?
+    assert note.score.none?
+    assert note.price.none?
+  end
+
+  # A date cast hands an object it does not recognize back unchanged, so the
+  # attribute behind the reader is where a surviving wrapper would show.
+  def test_a_date_writer_takes_an_option
+    due_on = Date.new(2026, 7, 31)
+    read_at = Time.utc(2026, 7, 31, 12, 0, 0)
+    note = Note.create!(due_on: Some(due_on), read_at: Some(read_at))
+
+    assert_equal due_on, note.attributes['due_on']
+    assert_equal read_at, note.attributes['read_at']
+    assert_equal due_on, note.reload.due_on.unwrap!
+    assert_equal read_at, note.read_at.unwrap!
+
+    note.update!(due_on: None(), read_at: None())
+
+    assert note.reload.due_on.none?
+    assert note.read_at.none?
+  end
+
+  # Dirty tracking, the before-type-cast reader and attributes read the
+  # attribute rather than the reader, so an Option must not survive as far as
+  # the attribute.
+  def test_an_option_assignment_leaves_raw_values_behind_the_reader
+    note = Note.create!
+    note.title = Some("Death's End")
+    note.pinned = Some(false)
+
+    assert_equal [nil, "Death's End"], note.changes['title']
+    assert_equal [nil, false], note.changes['pinned']
+    assert_equal "Death's End", note.read_attribute_before_type_cast('title')
+    assert_equal false, note.read_attribute_before_type_cast('pinned')
+    assert_equal "Death's End", note.attributes['title']
+
+    note.save!
+
+    assert_equal [nil, "Death's End"], note.saved_changes['title']
+  end
+
+  # A wrapped reader hands its value straight to another record's writer,
+  # which is the copy idiom a conversion leans on.
+  def test_an_attribute_copied_from_a_wrapped_reader_round_trips
+    note = Note.create!(title: 'The Dark Forest', body: 'a novel', rank: 3, due_on: Date.new(2026, 7, 31))
+    other = Note.create!
+
+    other.title = note.title
+    other.rank = note.rank
+    other.due_on = note.due_on
+    other.assign_attributes(body: note.body)
+    other.save!
+
+    assert_equal 'The Dark Forest', other.reload.title.unwrap!
+    assert_equal 'a novel', other.body.unwrap!
+    assert_equal 3, other.rank.unwrap!
+    assert_equal Date.new(2026, 7, 31), other.due_on.unwrap!
+  end
+
+  # update_all writes through the bind path rather than an attribute writer.
+  def test_update_all_takes_an_option
+    note = Note.create!(title: 'Supernova Era')
+
+    nudges = capture_stderr do
+      Note.where(id: note.id).update_all(
+        title: Some("Death's End"), pinned: Some(false), meta: Some({ 'isbn' => '9780765377104' }),
+        rank: Some(0), score: Some(1.5), price: Some(2.25)
+      )
+    end
+
+    assert_equal '', nudges
+    assert_equal "Death's End", note.reload.title.unwrap!
+    assert_equal false, note.pinned.unwrap!
+    assert_equal({ 'isbn' => '9780765377104' }, note.meta.unwrap!)
+    assert_equal 0, note.rank.unwrap!
+    assert_in_delta 1.5, note.score.unwrap!
+    assert_equal BigDecimal('2.25'), note.price.unwrap!
+
+    Note.where(id: note.id).update_all(title: None(), rank: None(), meta: None())
+
+    assert note.reload.title.none?
+    assert note.rank.none?
+    assert note.meta.none?
+  end
+
+  def test_insert_all_takes_an_option
+    nudges = capture_stderr do
+      Note.insert_all([{ title: Some('Supernova Era'), pinned: Some(false), meta: Some(%w[a b]),
+                         rank: Some(3), score: Some(1.5), price: Some(2.25),
+                         created_at: Time.now, updated_at: Time.now }])
+    end
+    note = Note.order(:id).last
+
+    assert_equal '', nudges
+    assert_equal 'Supernova Era', note.title.unwrap!
+    assert_equal false, note.pinned.unwrap!
+    assert_equal %w[a b], note.meta.unwrap!
+    assert_equal 3, note.rank.unwrap!
+    assert_in_delta 1.5, note.score.unwrap!
+    assert_equal BigDecimal('2.25'), note.price.unwrap!
+  end
+
+  def test_upsert_takes_an_option
+    note = Note.create!(title: 'Supernova Era')
+
+    nudges = capture_stderr do
+      Note.upsert({ id: note.id, title: Some("Death's End"), meta: Some({ 'isbn' => '978' }),
+                    rank: Some(0), score: Some(1.5), price: Some(2.25),
+                    created_at: Time.now, updated_at: Time.now })
+    end
+
+    assert_equal '', nudges
+    assert_equal "Death's End", note.reload.title.unwrap!
+    assert_equal({ 'isbn' => '978' }, note.meta.unwrap!)
+    assert_equal 0, note.rank.unwrap!
+    assert_in_delta 1.5, note.score.unwrap!
+    assert_equal BigDecimal('2.25'), note.price.unwrap!
+  end
+
+  # An attribute takes one value, and an Option of one is that value. An
+  # Option inside a collection is a different shape, and stays where it is.
+  def test_only_a_top_level_option_is_unwrapped_on_assignment
+    note = Note.create!(meta: Some([1, 2]))
+
+    assert_equal [1, 2], note.reload.meta.unwrap!
+
+    assert_raises(Errgonomic::SerializeError) { note.update!(meta: [Some(1), 2]) }
+  end
+
+  # A default is cast on its way into a new record, without passing a writer.
+  def test_an_attribute_default_takes_an_option
+    note = nil
+    nudges = capture_stderr { note = DefaultedNote.new }
+
+    assert_equal '', nudges
+    assert_equal false, note.pinned
+    assert_equal 0, note.rank
+    assert_equal({ 'shelf' => 'new' }, note.meta)
+    assert_nil note.title
+  end
+
+  # The predicate builder already unwraps a hash condition; unwrapping on
+  # assignment must leave that alone.
+  def test_where_still_matches_an_option_condition
+    note = Note.create!(title: 'Supernova Era', pinned: false)
+
+    assert_equal [note], Note.where(id: note.id, pinned: Some(false)).to_a
+    assert_empty Note.where(id: note.id, pinned: Some(true))
+    assert_equal [note], Note.where(id: note.id, read_at: None()).to_a
   end
 
   # ActiveRecord reads the association, asks it whether it is a new record,
@@ -839,7 +1487,155 @@ class BugTest < Minitest::Test
     assert_equal Book.errgonomic_optional_readers, Book.instance_method(:isbn).owner
   end
 
+  # A validator compares against the value, not the wrapper: an Option is
+  # never a member of the list a model spells out.
+  def test_inclusion_validates_the_value_inside_a_some
+    assert_predicate Manuscript.new(currency: Some('USD')), :valid?
+    refute_predicate Manuscript.new(currency: Some('GBP')), :valid?
+    assert_predicate Manuscript.new(currency: None()), :valid?
+  end
+
+  def test_exclusion_validates_the_value_inside_a_some
+    assert_predicate Manuscript.new(status: Some('draft')), :valid?
+    refute_predicate Manuscript.new(status: Some('withdrawn')), :valid?
+    assert_predicate Manuscript.new(status: None()), :valid?
+  end
+
+  # An empty string is absent as far as presence is concerned, and wrapping
+  # it does not make it a value.
+  def test_presence_rejects_an_empty_string_inside_a_some
+    blank = SubmittedManuscript.new(title: Some(''))
+
+    refute_predicate blank, :valid?
+    assert_equal ['can\'t be blank'], blank.errors[:title]
+
+    assert_predicate SubmittedManuscript.new(title: Some('Death\'s End')), :valid?
+    refute_predicate SubmittedManuscript.new(title: None()), :valid?
+  end
+
+  # Both validators reach the value through to_s.
+  def test_length_and_format_validate_the_value_inside_a_some
+    assert_predicate Manuscript.new(isbn: Some('9780765377104')), :valid?
+    refute_predicate Manuscript.new(isbn: Some('97807653771049')), :valid?
+    refute_predicate Manuscript.new(isbn: Some('978-0765377')), :valid?
+    assert_predicate Manuscript.new(isbn: None()), :valid?
+  end
+
+  def test_numericality_validates_the_value_inside_a_some
+    assert_predicate Manuscript.new(pages: Some(400)), :valid?
+    refute_predicate Manuscript.new(pages: Some(-1)), :valid?
+    refute_predicate Manuscript.new(pages: Some('four hundred')), :valid?
+    assert_predicate Manuscript.new(pages: None()), :valid?
+  end
+
+  # An empty string casts away to nil on an integer column, which allow_nil
+  # skips, and wrapping it changes neither step.
+  def test_numericality_gives_an_empty_string_the_same_verdict_wrapped_or_not
+    assert_equal Manuscript.new(pages: '').valid?, Manuscript.new(pages: Some('')).valid?
+  end
+
+  # An application's own validator reads through the same seam, so it is
+  # handed the value like every validator Rails ships.
+  def test_a_custom_validator_receives_the_value_inside_a_some
+    seen = []
+    audited = Class.new(ActiveRecord::Base) do
+      def self.name = 'AuditedManuscript'
+      self.table_name = 'manuscripts'
+      include Errgonomic::Rails::ActiveRecordOptional
+    end
+    audited.validates_each(:title) { |_record, _attribute, value| seen << value }
+
+    audited.new(title: Some('Death\'s End')).valid?
+    audited.new(title: None()).valid?
+
+    assert_equal ["Death's End", nil], seen
+  end
+
+  # An empty string amounts to nothing, which is what absence asks about.
+  def test_absence_weighs_the_value_inside_a_some
+    assert_predicate RetractedManuscript.new(status: Some('')), :valid?
+    refute_predicate RetractedManuscript.new(status: Some('withdrawn')), :valid?
+    assert_predicate RetractedManuscript.new(status: None()), :valid?
+  end
+
+  # Acceptance matches the value against a literal, which no wrapper equals.
+  def test_acceptance_matches_the_value_inside_a_some
+    assert_predicate RetractedManuscript.new(accepted: Some(true)), :valid?
+    refute_predicate RetractedManuscript.new(accepted: Some(false)), :valid?
+    assert_predicate RetractedManuscript.new(accepted: None()), :valid?
+  end
+
+  # Comparison orders the value against a bound, which an Option cannot be
+  # ordered against.
+  def test_comparison_orders_the_value_inside_a_some
+    assert_predicate RetractedManuscript.new(pages: Some(400)), :valid?
+    refute_predicate RetractedManuscript.new(pages: Some(-1)), :valid?
+    assert_predicate RetractedManuscript.new(pages: None()), :valid?
+  end
+
+  # The presence validation Rails adds for a required belongs_to reads the
+  # association through the same seam.
+  def test_a_required_belongs_to_reports_a_missing_record
+    author = Author.create!(name: 'Cixin Liu')
+    missing = AttributedManuscript.new(author: None())
+
+    refute_predicate missing, :valid?
+    assert_equal ['must exist'], missing.errors[:author]
+
+    assert_predicate AttributedManuscript.new(author: Some(author)), :valid?
+  end
+
+  def test_a_presence_validated_has_one_reports_a_missing_record
+    author = ProfiledAuthor.new(name: 'Cixin Liu')
+
+    refute_predicate author, :valid?
+    assert_equal ['can\'t be blank'], author.errors[:profile]
+
+    author.profile = Profile.new(tagline: 'writes sci-fi')
+
+    assert_predicate author, :valid?
+  end
+
+  # some: asks only whether the value is there, which is what separates it
+  # from presence, and it asks it of any model: a plain value is a value.
+  def test_some_asks_whether_the_value_is_there
+    blank = SubmittedManuscript.new(title: Some(''))
+    blank.valid?
+
+    refute_includes blank.errors[:title], 'is invalid'
+
+    absent = SubmittedManuscript.new(title: None())
+    absent.valid?
+
+    assert_includes absent.errors[:title], 'is invalid'
+
+    assert_predicate PlainManuscript.new(title: 'Death\'s End'), :valid?
+    refute_predicate PlainManuscript.new(title: nil), :valid?
+  end
+
+  # Every wrapped column of an unsaved record is None, and validation walks
+  # all of them.
+  def test_validating_a_converted_record_with_no_validations_does_not_raise
+    assert_predicate Note.new, :valid?
+  end
+
   private
+
+  def declare_serialize_none(mode, **scope)
+    Class.new(ActiveRecord::Base) do
+      self.table_name = 'books'
+      errgonomic_serialize_none(mode, **scope)
+    end
+  end
+
+  def capture_stderr
+    original = $stderr
+    $stderr = StringIO.new
+    yield
+    $stderr.string
+  ensure
+    $stderr = original
+  end
 
   def deeper(frames, &block)
     return block.call if frames.zero?
