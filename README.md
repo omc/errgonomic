@@ -305,11 +305,14 @@ end
 
 class Book < ApplicationRecord
   errgonomic_serialize_none :null                  # this model keeps them, as null (the default)
-  errgonomic_serialize_none :omit, only: %i[isbn]  # or per reader; except: also accepted
+end
+
+class Manuscript < ApplicationRecord
+  errgonomic_serialize_none :omit, only: %i[isbn]  # only this reader is dropped; except: also accepted
 end
 ```
 
-The declaration reads as well above the include as below it, as `errgonomic_optional_except` does. The nearest declaration wins and replaces whatever it inherits, rather than layering onto it, so a reader a scoped declaration does not name keeps the default. Omission drops keys from the payload the caller asked for, so it composes with the caller's own `only:` and `except:`. A declaration that cannot change a payload raises `ArgumentError` where it is written, naming what to write instead. That covers a mode other than `:null` or `:omit`, `only:` together with `except:`, and a scoped `:null`, which asks for the default on the readers it names and leaves the rest at the default anyway.
+The declaration reads as well above the include as below it, as `errgonomic_optional_except` does. The nearest declaration wins and replaces whatever it inherits, rather than layering onto it, so a reader a scoped declaration does not name keeps the default. Omission drops keys from the payload the caller asked for, so it composes with the caller's own `only:` and `except:`. It governs by reader name wherever the key came from, so a `methods:` entry naming a wrapped reader that reads `None` is dropped along with the reader, while a plain method that happens to return `nil` is kept. A declaration that cannot change a payload raises `ArgumentError` where it is written, naming what to write instead. That covers a mode other than `:null` or `:omit`, `only:` together with `except:`, and a scoped `:null`, which asks for the default on the readers it names and leaves the rest at the default anyway.
 
 `Model.errgonomic_optionals` reports which readers a model wrapped, including nullable foreign-key columns, so `book.author_id` is `Some(1)` alongside `book.author`. That is how to check that a conversion did what it meant to.
 

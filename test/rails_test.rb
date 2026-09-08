@@ -490,6 +490,11 @@ end
 class TerseBook < TerseRecord
   self.table_name = 'books'
   belongs_to :author, optional: true, class_name: 'SerializedAuthor'
+
+  # A plain method is not a reader a declaration governs, whatever it answers.
+  def blurb
+    nil
+  end
 end
 
 # A model below the declaration names the other mode, and gets what a model
@@ -703,6 +708,15 @@ class BugTest < Minitest::Test
 
     refute_includes hash, 'isbn'
     assert_equal 'Supernova Era', hash['title']
+  end
+
+  # Omission governs by reader name wherever the key came from, so a methods:
+  # entry naming a wrapped reader goes the way the reader does.
+  def test_omit_governs_a_method_entry_by_reader_name
+    hash = TerseBook.find(Book.create!(title: 'Supernova Era').id).as_json(methods: %i[isbn blurb])
+
+    refute_includes hash, 'isbn'
+    assert_nil hash.fetch('blurb')
   end
 
   # A model below the declaration says :null and is back to the default.
