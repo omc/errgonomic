@@ -35,6 +35,18 @@ ActiveRecord::Schema.define do
   create_table 'profiles', force: :cascade do |t|
     t.string :tagline
     t.references :author
+    t.references :agency
+    t.timestamps
+  end
+
+  create_table 'agencies', force: :cascade do |t|
+    t.string :name, null: false
+    t.timestamps
+  end
+
+  create_table 'citations', force: :cascade do |t|
+    t.string :note
+    t.references :subject, polymorphic: true
     t.timestamps
   end
 
@@ -75,6 +87,10 @@ end
 
 class Profile < ActiveRecord::Base
   belongs_to :author
+  belongs_to :agency
+end
+
+class Agency < ActiveRecord::Base
 end
 
 class Award < ActiveRecord::Base
@@ -87,6 +103,23 @@ class Publisher < ActiveRecord::Base
   self.table_name = 'authors'
   include Errgonomic::Rails::ActiveRecordOptional
   has_one :profile, required: true, foreign_key: :author_id
+end
+
+# A polymorphic belongs_to takes the class it points at from the record
+# assigned, so the writer has to reach the record inside the Option before
+# either key is written.
+class Citation < ActiveRecord::Base
+  include Errgonomic::Rails::ActiveRecordOptional
+  belongs_to :subject, polymorphic: true, optional: true
+end
+
+# A has_one :through assigns by creating or destroying the join record and
+# reads the assigned record's own key to do it.
+class Contributor < ActiveRecord::Base
+  self.table_name = 'authors'
+  include Errgonomic::Rails::ActiveRecordOptional
+  has_one :profile, foreign_key: :author_id, dependent: :destroy
+  has_one :agency, through: :profile
 end
 
 class Book < ActiveRecord::Base
@@ -497,6 +530,119 @@ class BugTest < Minitest::Test
     author.destroy!
 
     assert_equal 0, Profile.where(author_id: author.id).count
+  end
+
+  # A wrapped reader on one record is the ordinary source for a writer on
+  # another, so the writer takes the Option the reader hands back.
+  def test_belongs_to_writer_takes_an_option
+    author = Author.create!(name: 'Cixin Liu')
+    book = Book.create!(title: 'The Dark Forest')
+
+    book.author = Some(author)
+    book.save!
+
+    assert_equal author.id, book.reload.author_id.unwrap!
+
+    book.author = None()
+    book.save!
+
+    assert book.reload.author.none?
+  end
+
+  # Unwrapping is not a loosening of the type check: the wrong class inside a
+  # Some is still the wrong class, and the message says which one arrived.
+  def test_belongs_to_writer_rejects_a_some_of_the_wrong_class
+    book = Book.create!(title: 'The Dark Forest')
+    profile = Profile.create!(tagline: 'writes sci-fi')
+
+    error = assert_raises(ActiveRecord::AssociationTypeMismatch) { book.author = Some(profile) }
+
+    assert_match(/Author/, error.message)
+    assert_match(/Profile/, error.message)
+    refute_match(/Some/, error.message)
+  end
+
+  def test_has_one_writer_takes_an_option
+    author = Author.create!(name: 'Cixin Liu')
+
+    author.profile = Some(Profile.new(tagline: 'writes sci-fi'))
+
+    assert_equal 'writes sci-fi', author.reload.profile.unwrap!.tagline
+
+    author.profile = None()
+
+    assert author.reload.profile.none?
+  end
+
+  def test_has_one_writer_rejects_a_some_of_the_wrong_class
+    author = Author.create!(name: 'Cixin Liu')
+
+    error = assert_raises(ActiveRecord::AssociationTypeMismatch) { author.profile = Some(author) }
+
+    assert_match(/Profile/, error.message)
+    refute_match(/Some/, error.message)
+  end
+
+  # A polymorphic writer takes two keys from one record, so the record has to
+  # be in hand before either is written.
+  def test_polymorphic_belongs_to_writer_takes_an_option
+    author = Author.create!(name: 'Cixin Liu')
+    citation = Citation.create!(note: 'foreword')
+
+    citation.subject = Some(author)
+    citation.save!
+
+    assert_equal 'Author', citation.reload.subject_type.unwrap!
+    assert_equal author.id, citation.subject_id.unwrap!
+
+    citation.subject = None()
+    citation.save!
+
+    assert citation.reload.subject.none?
+    assert citation.subject_type.none?
+    assert citation.subject_id.none?
+  end
+
+  # A has_one :through assigns by writing the join row, and reads the
+  # assigned record's key to do it.
+  def test_has_one_through_writer_takes_an_option
+    contributor = Contributor.create!(name: 'Cixin Liu')
+    agency = Agency.create!(name: 'Tor')
+
+    contributor.agency = Some(agency)
+
+    assert_equal agency, contributor.reload.agency.unwrap!
+    assert_equal agency.id, Profile.find_by(author_id: contributor.id).agency_id
+
+    contributor.agency = None()
+
+    assert contributor.reload.agency.none?
+    assert_nil Profile.find_by(author_id: contributor.id)
+  end
+
+  def test_has_one_through_writer_rejects_a_some_of_the_wrong_class
+    contributor = Contributor.create!(name: 'Cixin Liu')
+    book = Book.create!(title: 'The Dark Forest')
+
+    error = assert_raises(ActiveRecord::AssociationTypeMismatch) { contributor.agency = Some(book) }
+
+    assert_match(/Agency/, error.message)
+    assert_match(/Book/, error.message)
+    refute_match(/Some/, error.message)
+    assert_nil Profile.find_by(author_id: contributor.id)
+  end
+
+  # The idiom a conversion runs into everywhere: one record's association
+  # copied straight onto another's, through the wrapped reader.
+  def test_an_association_copied_from_a_wrapped_reader_round_trips
+    author = Author.create!(name: 'Cixin Liu')
+    book = Book.create!(title: 'The Dark Forest', author_id: author.id)
+    other_book = Book.create!(title: 'Death\'s End')
+
+    other_book.author = book.author
+    other_book.save!
+
+    assert_equal author, other_book.reload.author.unwrap!
   end
 
   # ActiveRecord reads the association, asks it whether it is a new record,

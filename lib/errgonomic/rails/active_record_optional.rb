@@ -21,8 +21,9 @@ module Errgonomic
     #    None() == nil stays false.
     # 2. Some delegates persisted?, marked_for_destruction?, and touch_later
     #    to its record, so a Some can stand in for it during persistence.
-    # 3. Quoting and predicate-building prepends unwrap Options at the SQL
-    #    boundary, so an Option can be passed to where/quote.
+    # 3. Boundaries into ActiveRecord unwrap Options: quoting and predicate
+    #    building at the SQL boundary, and singular association writers on
+    #    assignment.
     # 4. SomeValidator provides a presence-style validation for Option
     #    attributes.
     # 5. Readers that ActiveRecord's own machinery reads raw are never
@@ -330,8 +331,9 @@ module Errgonomic
       end
     end
 
-    # Unwrap Options in a query condition, reaching one level into an array
-    # so a list of Options binds like a list of values.
+    # Take the value inside an Option at a boundary into ActiveRecord, and a
+    # None as nil, reaching one level into an array so a list of Options
+    # passes as a list of values.
     def self.unwrap_options(value)
       case value
       when Errgonomic::Option::Any
@@ -346,3 +348,19 @@ module Errgonomic
 end
 
 ActiveRecord::PredicateBuilder.prepend(Errgonomic::Rails::ActiveRecordPredicateBuilder)
+
+module Errgonomic
+  module Rails
+    # A singular association writer is a setter, not a typed field, so it
+    # takes what a wrapped reader hands back: Some(record) assigns the record,
+    # None() clears the association. A Some of the wrong class still fails the
+    # association's own type check, naming the class inside it.
+    module ActiveRecordSingularAssociationWriter
+      def writer(value)
+        super(Errgonomic::Rails.unwrap_options(value))
+      end
+    end
+  end
+end
+
+ActiveRecord::Associations::SingularAssociation.prepend(Errgonomic::Rails::ActiveRecordSingularAssociationWriter)
