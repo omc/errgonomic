@@ -187,6 +187,19 @@ h.dig(:person, :nickname)     # => None()      (absent)
 
 `dig` checks presence at every step, so an absent path and a present `nil` stay distinguishable, which core `dig` conflates. Digging into a non-collection raises `Errgonomic::TypeMismatchError` rather than answering `None()`, in the gem's pedantic style.
 
+`sequence_options` and `sequence_results` are the all-or-nothing collection, which Rust spells as a `collect` into `Option<Vec<T>>` or `Result<Vec<T>, E>`. They are on `Enumerable`, so they compose with `map` instead of needing a wrapper type. The first `None` or `Err` short-circuits, and an `Err` comes back as it stands, still carrying its error.
+
+```ruby
+[Some(1), Some(2)].sequence_options   # => Some([1, 2])
+[Some(1), None()].sequence_options    # => None()
+[].sequence_options                   # => Some([])
+
+[Ok(1), Ok(2)].sequence_results       # => Ok([1, 2])
+[Ok(1), Err(:nope)].sequence_results  # => Err(:nope)
+```
+
+A member that is not an Option, or not a Result, raises `Errgonomic::TypeMismatchError` in the same pedantic style as `Option#flatten`. It raises regardless of `with_ambiguous_downstream_errors`, which relaxes what a block returned rather than what a caller passed in. A Hash enumerates as pairs, which are Arrays, so `hash.values.sequence_options` is the spelling for a hash of Options.
+
 ### Booleans
 
 Booleans lift into the containers, following Rust's `bool`: `then_some`, and `ok_or`/`ok_or_else` from nightly. Rust splits the lazy form into `then`, but that name is core Ruby (`Kernel#then`), which Errgonomic will not redefine; `then_some` takes either a value or a block instead. Rust's `ok_or` returns `Result<(), E>`; Ruby has no unit type, so `Ok` carries `true`.

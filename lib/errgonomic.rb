@@ -19,6 +19,9 @@ require_relative 'errgonomic/core_ext/array'
 # Lift booleans into Option and Result.
 require_relative 'errgonomic/core_ext/bool'
 
+# All-or-nothing collection over an Enumerable of Options or Results.
+require_relative 'errgonomic/core_ext/enumerable'
+
 # Rails fu
 require_relative 'errgonomic/rails' if defined?(Rails::Railtie)
 
