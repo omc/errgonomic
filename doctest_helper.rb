@@ -14,14 +14,14 @@ ActiveRecord::Base.logger = Logger.new(File::NULL)
 # One nullable column per type the cast boundary has to map.
 ActiveRecord::Schema.verbose = false
 ActiveRecord::Schema.define do
-  create_table 'authors', force: :cascade do |t|
+  create_table 'writers', force: :cascade do |t|
     t.string :name
     t.text :bio
   end
 
   create_table 'articles', force: :cascade do |t|
     t.string :title
-    t.references :author
+    t.references :writer
   end
 
   create_table 'notes', force: :cascade do |t|
@@ -45,7 +45,7 @@ end
 
 # An unconverted delegation target: its readers hand back plain values, and
 # two of its methods take an argument, a keyword and a block.
-class Author < ActiveRecord::Base
+class Writer < ActiveRecord::Base
   def greeting(salutation, punctuation: '.')
     "#{salutation}, #{name}#{punctuation}"
   end
@@ -58,27 +58,27 @@ end
 # A converted model reads its association as an Option.
 class Article < ActiveRecord::Base
   include Errgonomic::Rails::ActiveRecordOptional
-  belongs_to :author, optional: true
-  delegate_optional :name, to: :author, prefix: true
-  delegate_optional :name, to: :author, prefix: :writer
-  delegate_optional :bio, to: :author
-  delegate_optional :greeting, :styled_name, to: :author, prefix: true
+  belongs_to :writer, optional: true
+  delegate_optional :name, to: :writer, prefix: true
+  delegate_optional :name, to: :writer, prefix: :author
+  delegate_optional :bio, to: :writer
+  delegate_optional :greeting, :styled_name, to: :writer, prefix: true
   delegate_optional :table_name, to: :class
 end
 
 # The same records read through a converted model, so the target's own
 # reader is already an Option.
 class Byline < ActiveRecord::Base
-  self.table_name = 'authors'
+  self.table_name = 'writers'
   include Errgonomic::Rails::ActiveRecordOptional
 end
 
 # Unconverted, so the association reader hands back a plain record or nil.
 class Draft < ActiveRecord::Base
   self.table_name = 'articles'
-  belongs_to :author, optional: true
-  belongs_to :byline, class_name: 'Byline', foreign_key: :author_id, optional: true
-  delegate_optional :name, to: :author, prefix: true
+  belongs_to :writer, optional: true
+  belongs_to :byline, class_name: 'Byline', foreign_key: :writer_id, optional: true
+  delegate_optional :name, to: :writer, prefix: true
   delegate_optional :name, to: :byline, prefix: true
 end
 
@@ -86,9 +86,9 @@ end
 # a delegation declared private stays off the public surface.
 class Reprint < ActiveRecord::Base
   self.table_name = 'articles'
-  belongs_to :author, optional: true
-  delegate_optional :name, to: :author, prefix: true, allow_nil: true
-  delegate_optional :bio, to: :author, private: true
+  belongs_to :writer, optional: true
+  delegate_optional :name, to: :writer, prefix: true, allow_nil: true
+  delegate_optional :bio, to: :writer, private: true
 end
 
 # Two validators that answer differently for the same wrapped value.

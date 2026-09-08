@@ -25,30 +25,30 @@ module Errgonomic
       #
       # @!method delegate_optional(*methods, to: nil, prefix: nil, private: nil, allow_nil: nil)
       #   @example prefix forms name the reader, as they do for Rails' delegate
-      #     article = Article.create!(title: 'Omelas', author: Author.create!(name: 'Ursula', bio: 'writes'))
-      #     article.author_name # => Some('Ursula')
+      #     article = Article.create!(title: 'Omelas', writer: Writer.create!(name: 'Ursula', bio: 'writes'))
       #     article.writer_name # => Some('Ursula')
+      #     article.author_name # => Some('Ursula')
       #     article.bio # => Some('writes')
       #   @example a delegated call forwards what it was handed
-      #     article = Article.create!(title: 'Omelas', author: Author.create!(name: 'Ursula'))
-      #     article.author_greeting('Hello') # => Some('Hello, Ursula.')
-      #     article.author_greeting('Hi', punctuation: '!') # => Some('Hi, Ursula!')
-      #     article.author_styled_name(&:upcase) # => Some('URSULA')
+      #     article = Article.create!(title: 'Omelas', writer: Writer.create!(name: 'Ursula'))
+      #     article.writer_greeting('Hello') # => Some('Hello, Ursula.')
+      #     article.writer_greeting('Hi', punctuation: '!') # => Some('Hi, Ursula!')
+      #     article.writer_styled_name(&:upcase) # => Some('URSULA')
       #   @example a target named for a Ruby keyword is reached through self
       #     Article.create!(title: 'Omelas').table_name # => Some('articles')
       #   @example the target is lifted, and an Option it hands back is not nested
-      #     draft = Draft.create!(title: 'Omelas', author_id: Author.create!(name: 'Ursula').id)
-      #     draft.author_name # => Some('Ursula')
+      #     draft = Draft.create!(title: 'Omelas', writer_id: Writer.create!(name: 'Ursula').id)
+      #     draft.writer_name # => Some('Ursula')
       #     draft.byline_name # => Some('Ursula')
-      #     Draft.create!(title: 'Untitled').author_name # => None()
-      #     Article.create!(title: 'Untitled').author_name # => None()
+      #     Draft.create!(title: 'Untitled').writer_name # => None()
+      #     Article.create!(title: 'Untitled').writer_name # => None()
       #   @example a delegated reader points at the model that declared it
-      #     Article.instance_method(:author_name).source_location.first.end_with?('doctest_helper.rb') # => true
+      #     Article.instance_method(:writer_name).source_location.first.end_with?('doctest_helper.rb') # => true
       #   @example an absent target is a value here, so allow_nil: true says nothing new
-      #     Reprint.create!(title: 'Untitled').author_name # => None()
+      #     Reprint.create!(title: 'Untitled').writer_name # => None()
       #     Reprint.create!(title: 'Untitled').respond_to?(:bio) # => false
       #     begin
-      #       Class.new(Reprint) { delegate_optional :name, to: :author, allow_nil: false }
+      #       Class.new(Reprint) { delegate_optional :name, to: :writer, allow_nil: false }
       #     rescue ArgumentError => e
       #       e.message
       #     end # => 'delegate_optional reads an absent target as None; allow_nil: false asks for something else'
@@ -60,7 +60,7 @@ module Errgonomic
       #     end.start_with?("Delegation needs a target. Supply a keyword argument 'to'") # => true
       #   @example a writer is not delegated
       #     begin
-      #       Class.new(Reprint) { delegate_optional :name=, to: :author }
+      #       Class.new(Reprint) { delegate_optional :name=, to: :writer }
       #     rescue ArgumentError => e
       #       e.message
       #     end # => 'delegate_optional does not delegate a writer; an absent target would drop the value assigned'
@@ -72,7 +72,7 @@ module Errgonomic
       #     end # => "prefix: true takes the target's own name, and a module target has none; name the prefix"
       #   @example an automatic prefix needs a target it can name a method after
       #     begin
-      #       Class.new(Article) { delegate_optional :name, to: :@author, prefix: true }
+      #       Class.new(Article) { delegate_optional :name, to: :@writer, prefix: true }
       #     rescue ArgumentError => e
       #       e.message
       #     end # => 'Can only automatically set the delegation prefix when delegating to a method.'
