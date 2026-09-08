@@ -331,8 +331,9 @@ module Errgonomic
       end
     end
 
-    # Unwrap Options in a query condition, reaching one level into an array
-    # so a list of Options binds like a list of values.
+    # Take the value inside an Option at a boundary into ActiveRecord, and a
+    # None as nil, reaching one level into an array so a list of Options
+    # passes as a list of values.
     def self.unwrap_options(value)
       case value
       when Errgonomic::Option::Any

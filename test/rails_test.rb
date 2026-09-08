@@ -35,6 +35,18 @@ ActiveRecord::Schema.define do
   create_table 'profiles', force: :cascade do |t|
     t.string :tagline
     t.references :author
+    t.references :agency
+    t.timestamps
+  end
+
+  create_table 'agencies', force: :cascade do |t|
+    t.string :name, null: false
+    t.timestamps
+  end
+
+  create_table 'citations', force: :cascade do |t|
+    t.string :note
+    t.references :subject, polymorphic: true
     t.timestamps
   end
 
@@ -75,6 +87,10 @@ end
 
 class Profile < ActiveRecord::Base
   belongs_to :author
+  belongs_to :agency
+end
+
+class Agency < ActiveRecord::Base
 end
 
 class Award < ActiveRecord::Base
@@ -87,6 +103,23 @@ class Publisher < ActiveRecord::Base
   self.table_name = 'authors'
   include Errgonomic::Rails::ActiveRecordOptional
   has_one :profile, required: true, foreign_key: :author_id
+end
+
+# A polymorphic belongs_to takes the class it points at from the record
+# assigned, so the writer has to reach the record inside the Option before
+# either key is written.
+class Citation < ActiveRecord::Base
+  include Errgonomic::Rails::ActiveRecordOptional
+  belongs_to :subject, polymorphic: true, optional: true
+end
+
+# A has_one :through assigns by creating or destroying the join record and
+# reads the assigned record's own key to do it.
+class Contributor < ActiveRecord::Base
+  self.table_name = 'authors'
+  include Errgonomic::Rails::ActiveRecordOptional
+  has_one :profile, foreign_key: :author_id, dependent: :destroy
+  has_one :agency, through: :profile
 end
 
 class Book < ActiveRecord::Base
@@ -548,6 +581,55 @@ class BugTest < Minitest::Test
 
     assert_match(/Profile/, error.message)
     refute_match(/Some/, error.message)
+  end
+
+  # A polymorphic writer takes two keys from one record, so the record has to
+  # be in hand before either is written.
+  def test_polymorphic_belongs_to_writer_takes_an_option
+    author = Author.create!(name: 'Cixin Liu')
+    citation = Citation.create!(note: 'foreword')
+
+    citation.subject = Some(author)
+    citation.save!
+
+    assert_equal 'Author', citation.reload.subject_type.unwrap!
+    assert_equal author.id, citation.subject_id.unwrap!
+
+    citation.subject = None()
+    citation.save!
+
+    assert citation.reload.subject.none?
+    assert citation.subject_type.none?
+    assert citation.subject_id.none?
+  end
+
+  # A has_one :through assigns by writing the join row, and reads the
+  # assigned record's key to do it.
+  def test_has_one_through_writer_takes_an_option
+    contributor = Contributor.create!(name: 'Cixin Liu')
+    agency = Agency.create!(name: 'Tor')
+
+    contributor.agency = Some(agency)
+
+    assert_equal agency, contributor.reload.agency.unwrap!
+    assert_equal agency.id, Profile.find_by(author_id: contributor.id).agency_id
+
+    contributor.agency = None()
+
+    assert contributor.reload.agency.none?
+    assert_nil Profile.find_by(author_id: contributor.id)
+  end
+
+  def test_has_one_through_writer_rejects_a_some_of_the_wrong_class
+    contributor = Contributor.create!(name: 'Cixin Liu')
+    book = Book.create!(title: 'The Dark Forest')
+
+    error = assert_raises(ActiveRecord::AssociationTypeMismatch) { contributor.agency = Some(book) }
+
+    assert_match(/Agency/, error.message)
+    assert_match(/Book/, error.message)
+    refute_match(/Some/, error.message)
+    assert_nil Profile.find_by(author_id: contributor.id)
   end
 
   # The idiom a conversion runs into everywhere: one record's association
