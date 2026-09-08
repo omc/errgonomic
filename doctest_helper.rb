@@ -38,10 +38,11 @@ end
 # value, so `# => None()` keeps meaning what it says.
 module DoctestOptionEquality
   def assert_example(example, expected, actual, bind)
-    value = evaluate_with_assertion(expected, bind)
-    return super unless value.is_a?(Errgonomic::Option::Any)
+    # An expectation is a literal in the example's own binding, so leaving
+    # the other branches to super costs nothing but evaluating it twice.
+    return super unless evaluate_with_assertion(expected, bind).is_a?(Errgonomic::Option::Any)
 
-    assert_equal(value, evaluate_with_assertion(actual, bind))
+    assert_equal(evaluate_with_assertion(expected, bind), evaluate_with_assertion(actual, bind))
   rescue Minitest::Assertion => e
     add_filepath_to_backtrace(e, example.filepath)
     raise e

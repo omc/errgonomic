@@ -676,9 +676,9 @@ class BugTest < Minitest::Test
   end
 
   # An Option assigned through an attribute writer stores what its inner
-  # value stores. Boolean is the type that used to corrupt: a Some is truthy
-  # and is not one of ActiveModel's FALSE_VALUES, so a wrapped false cast to
-  # true.
+  # value stores. Boolean is the type with the sharpest edge: a Some is
+  # truthy and is not one of ActiveModel's FALSE_VALUES, so a cast that saw
+  # the wrapper would read a wrapped false as true.
   def test_a_boolean_writer_takes_an_option
     note = Note.create!(pinned: Some(false))
 
@@ -715,8 +715,8 @@ class BugTest < Minitest::Test
     assert note.reload.meta.none?
   end
 
-  # The numeric casts used to work by accident, through Option#presence,
-  # which is soft-deprecated and nudges on stderr on every assignment.
+  # A numeric writer reaches its value without Option#presence, which is
+  # soft-deprecated and nudges on stderr on every call.
   def test_a_numeric_writer_takes_an_option_without_a_deprecation_nudge
     note = nil
     nudges = capture_stderr do
@@ -741,8 +741,8 @@ class BugTest < Minitest::Test
     assert note.price.none?
   end
 
-  # A date cast used to hand an unrecognized object back unchanged, so the
-  # wrapper reached the attribute and everything that reads it raw.
+  # A date cast hands an object it does not recognize back unchanged, so the
+  # attribute behind the reader is where a surviving wrapper would show.
   def test_a_date_writer_takes_an_option
     due_on = Date.new(2026, 7, 31)
     read_at = Time.utc(2026, 7, 31, 12, 0, 0)
