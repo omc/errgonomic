@@ -295,6 +295,22 @@ The assignment and cast seams are installed on ActiveModel itself, as the quotin
 
 An association under `include:` follows the same rule: `Some(author)` serializes as the record's own hash, and a `None` leaves the key out, which is what `include:` already does with a `nil` association. A `has_many` is never an Option and is untouched. A wrapped reader named in `methods:` unwraps one layer as well, so `as_json(methods: :isbn)` writes the value; a method that hands back a plain value is unchanged.
 
+Omission is the opt-in, as it is in serde, and it is declared on the model rather than on `belongs_to` or `has_one`:
+
+```ruby
+class ApplicationRecord < ActiveRecord::Base
+  include Errgonomic::Rails::ActiveRecordOptional
+  errgonomic_serialize_none :omit                  # drop keys whose value is None
+end
+
+class Book < ApplicationRecord
+  errgonomic_serialize_none :null                  # this model keeps them, as null (the default)
+  errgonomic_serialize_none :omit, only: %i[isbn]  # or per reader; except: also accepted
+end
+```
+
+The nearest declaration wins and replaces whatever it inherits, rather than layering onto it, so a reader a scoped declaration does not name keeps the default. Omission drops keys from the payload the caller asked for, so it composes with the caller's own `only:` and `except:`. A mode other than `:null` or `:omit` raises `ArgumentError` where it is written.
+
 `Model.errgonomic_optionals` reports which readers a model wrapped, including nullable foreign-key columns, so `book.author_id` is `Some(1)` alongside `book.author`. That is how to check that a conversion did what it meant to.
 
 - `delegate_optional :name, to: :association` (available on all models) delegates through an optional association, returning an Option instead of raising on nil.
@@ -311,7 +327,7 @@ This is the register of where the gem leaves the Rust idiom, and why. ActiveReco
 4. `SomeValidator` asks whether a value is there at all, where `presence` asks whether it amounts to anything: `Some('')` passes `validates :x, some: true` and fails `presence: true`. It lifts what it is handed, so it asks the same question of any model, converted or not.
 5. Where ActiveRecord's own machinery reads a value raw, it gets one. Validation unwraps at `read_attribute_for_validation`, the seam every `EachValidator` fetches an attribute through, and serialization at `read_attribute_for_serialization`, the seam every attribute in a payload is fetched through, so a standard validator weighs the value and a payload carries it rather than the wrapper. A singular association with `accepts_nested_attributes_for` goes further and keeps its plain reader: nested attributes are assigned through the reader, and ActiveRecord asks whatever it finds there whether it is a new record.
 
-The set is closed. If a future integration appears to need a sixth compromise, that is a signal ActiveRecord is pushing back somewhere unmapped, and it warrants a design discussion rather than a quiet patch. `errgonomic_optional_except` is deliberately not on the list: it is configuration, an escape hatch that softens the all-or-nothing include for whatever conflict shows up next, rather than a semantic exception.
+The set is closed. If a future integration appears to need a sixth compromise, that is a signal ActiveRecord is pushing back somewhere unmapped, and it warrants a design discussion rather than a quiet patch. `errgonomic_optional_except` and `errgonomic_serialize_none` are deliberately not on the list: they are configuration, an escape hatch that softens the all-or-nothing include for whatever conflict shows up next and a choice of how an absent value is written, rather than semantic exceptions.
 
 ## Development
 

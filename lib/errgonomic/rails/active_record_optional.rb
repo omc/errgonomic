@@ -41,9 +41,10 @@ module Errgonomic
     #    reader: nested attributes are assigned through the reader, and
     #    ActiveRecord asks whatever it finds there whether it is a new record.
     #
-    # errgonomic_optional_except is not on the list: it is configuration, an
-    # escape hatch for whatever conflict shows up next, not a semantic
-    # exception.
+    # errgonomic_optional_except and errgonomic_serialize_none are not on the
+    # list: they are configuration, an escape hatch for whatever conflict
+    # shows up next and a choice of how an absent value is written, not
+    # semantic exceptions.
     module ActiveRecordOptional
       extend ActiveSupport::Concern
 
@@ -87,13 +88,11 @@ module Errgonomic
       #   Note.new(title: Some('Wanderer')).serializable_hash(only: [], methods: :title) # => { 'title' => 'Wanderer' }
       def serializable_hash(options = nil)
         hash = super
-        return hash if options.nil?
-
-        Array(options[:methods]).each do |name|
+        Array(options.to_h[:methods]).each do |name|
           key = name.to_s
           hash[key] = Errgonomic::Rails.unwrap_option(hash[key]) if hash.key?(key)
         end
-        hash
+        errgonomic_omit_absent_keys(hash)
       end
 
       class_methods do
@@ -147,6 +146,43 @@ module Errgonomic
           inherited |
             Array(try(:errgonomic_optional_exceptions)).map(&:to_s) |
             errgonomic_nested_attribute_associations
+        end
+
+        # How a None reaches a payload. :null writes it as null, which is
+        # what Rails does with nil and what serde does with None unless a
+        # field asks otherwise, so it is the default and needs no
+        # declaration. :omit leaves the key out instead. only: and except:
+        # scope the mode to named readers, and a reader outside the scope
+        # keeps the default.
+        def errgonomic_serialize_none(mode, only: nil, except: nil)
+          unless %i[null omit].include?(mode)
+            raise ::ArgumentError, "errgonomic_serialize_none takes :null or :omit, not #{mode.inspect}"
+          end
+
+          @errgonomic_serialize_none = {
+            mode: mode,
+            only: only && Array(only).map(&:to_s),
+            except: except && Array(except).map(&:to_s)
+          }
+        end
+
+        # The nearest declaration is the whole story for a class: it replaces
+        # whatever it inherits rather than layering onto it, so a scoped one
+        # leaves every reader it does not name at the default.
+        def errgonomic_serialize_none_declaration
+          return @errgonomic_serialize_none if defined?(@errgonomic_serialize_none)
+          return nil unless superclass.respond_to?(:errgonomic_serialize_none_declaration)
+
+          superclass.errgonomic_serialize_none_declaration
+        end
+
+        def errgonomic_serialize_none_omit?(name)
+          declaration = errgonomic_serialize_none_declaration
+          return false unless declaration && declaration[:mode] == :omit
+          return declaration[:only].include?(name) if declaration[:only]
+          return declaration[:except].exclude?(name) if declaration[:except]
+
+          true
         end
 
         # A model that keeps value-or-nil throughout, for whatever the
@@ -273,6 +309,18 @@ module Errgonomic
         super do |association, records, opts|
           records = Errgonomic::Rails.unwrap_option(records)
           yield association, records, opts unless records.nil?
+        end
+      end
+
+      # Deleting from the payload rather than from the attribute list is what
+      # keeps the caller's own only: and except: in force. A wrapped reader
+      # never holds Some(nil), so a nil here is the None it was declared for.
+      def errgonomic_omit_absent_keys(hash)
+        klass = self.class
+        return hash unless klass.errgonomic_serialize_none_declaration&.fetch(:mode) == :omit
+
+        hash.delete_if do |key, value|
+          value.nil? && klass.errgonomic_optional?(key) && klass.errgonomic_serialize_none_omit?(key)
         end
       end
     end

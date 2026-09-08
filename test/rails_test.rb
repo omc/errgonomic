@@ -479,6 +479,38 @@ class PlainAuthor < ActiveRecord::Base
   has_many :books, class_name: 'PlainBook', foreign_key: :author_id
 end
 
+# Omission is the opt-in, and an application's own base class is where it is
+# declared once for every model below.
+class TerseRecord < ActiveRecord::Base
+  self.abstract_class = true
+  include Errgonomic::Rails::ActiveRecordOptional
+  errgonomic_serialize_none :omit
+end
+
+class TerseBook < TerseRecord
+  self.table_name = 'books'
+  belongs_to :author, optional: true, class_name: 'SerializedAuthor'
+end
+
+# A model below the declaration names the other mode, and gets what a model
+# with no declaration anywhere gets.
+class VerboseBook < TerseRecord
+  self.table_name = 'books'
+  errgonomic_serialize_none :null
+end
+
+# only: and except: scope the mode to named readers, and a reader outside the
+# scope keeps the default.
+class SelectiveBook < TerseRecord
+  self.table_name = 'books'
+  errgonomic_serialize_none :omit, only: %i[isbn]
+end
+
+class ExceptedBook < TerseRecord
+  self.table_name = 'books'
+  errgonomic_serialize_none :omit, except: %i[isbn]
+end
+
 class BugTest < Minitest::Test
   def test_optional_attributes
     author = Author.create!(name: 'Cixin Liu')
@@ -640,6 +672,66 @@ class BugTest < Minitest::Test
     assert_equal '9780765377104', SerializedBook.find(row.id).as_json(methods: :isbn)['isbn']
     assert_equal '9780765377104', SerializedBook.find(row.id).serializable_hash(methods: :isbn)['isbn']
     assert_nil SerializedBook.create!(title: 'Supernova Era').serializable_hash(methods: :isbn)['isbn']
+  end
+
+  # Omission is the opt-in, and it drops only the keys the record has no
+  # value for: a Some is a value like any other.
+  def test_omit_drops_the_keys_a_record_has_no_value_for
+    absent = TerseBook.find(Book.create!(title: 'Supernova Era').id).as_json
+    present = TerseBook.find(Book.create!(title: 'The Dark Forest', isbn: '9780765377104').id).as_json
+
+    refute_includes absent, 'isbn'
+    refute_includes absent, 'published_at'
+    assert_equal 'Supernova Era', absent['title']
+
+    assert_equal '9780765377104', present['isbn']
+    refute_includes present, 'published_at'
+  end
+
+  # A model below the declaration says :null and is back to the default.
+  def test_a_subclass_declares_its_way_back_to_null
+    row = Book.create!(title: 'Supernova Era')
+
+    assert_equal PlainBook.find(row.id).as_json, VerboseBook.find(row.id).as_json
+  end
+
+  # A scoped declaration replaces the one it inherits, so a reader it does
+  # not name keeps the default rather than the mode above it.
+  def test_omit_scoped_to_named_readers
+    row = Book.create!(title: 'Supernova Era')
+    only = SelectiveBook.find(row.id).as_json
+    except = ExceptedBook.find(row.id).as_json
+
+    refute_includes only, 'isbn'
+    assert_nil only.fetch('published_at')
+
+    assert_nil except.fetch('isbn')
+    refute_includes except, 'published_at'
+  end
+
+  # An absent association is left out of a payload either way, and a present
+  # one is its record's hash either way.
+  def test_omit_leaves_an_absent_association_out
+    author = Author.create!(name: 'Cixin Liu')
+    shelved = Book.create!(title: 'The Dark Forest', author_id: author.id)
+    unshelved = Book.create!(title: 'Supernova Era')
+
+    refute_includes TerseBook.find(unshelved.id).as_json(include: :author), 'author'
+    assert_equal 'Cixin Liu', TerseBook.find(shelved.id).as_json(include: :author).dig('author', 'name')
+  end
+
+  # A mode the concern does not know would be a silent no-op, so it is
+  # refused where it is written.
+  def test_an_unknown_serialize_none_mode_is_refused
+    error = assert_raises(ArgumentError) do
+      Class.new(ActiveRecord::Base) do
+        self.table_name = 'books'
+        include Errgonomic::Rails::ActiveRecordOptional
+        errgonomic_serialize_none :skip
+      end
+    end
+
+    assert_match(/:null or :omit/, error.message)
   end
 
   # A model that keeps value-or-nil throughout has nothing to unwrap.
