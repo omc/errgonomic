@@ -22,6 +22,12 @@ module Errgonomic
       #     article.author_greeting('Hello') # => Some('Hello, Ursula.')
       #     article.author_greeting('Hi', punctuation: '!') # => Some('Hi, Ursula!')
       #     article.author_styled_name(&:upcase) # => Some('URSULA')
+      #   @example the target is lifted, and an Option it hands back is not nested
+      #     draft = Draft.create!(title: 'Omelas', author_id: Author.create!(name: 'Ursula').id)
+      #     draft.author_name # => Some('Ursula')
+      #     draft.byline_name # => Some('Ursula')
+      #     Draft.create!(title: 'Untitled').author_name # => None()
+      #     Article.create!(title: 'Untitled').author_name # => None()
       #   @example an automatic prefix needs a target it can name a method after
       #     begin
       #       Class.new(Article) { delegate_optional :name, to: :@author, prefix: true }
@@ -99,12 +105,15 @@ module Errgonomic
           end
         end
 
-        # The call is written out rather than sent, so the target's method is
-        # reached on the same terms a caller would reach it on.
+        # Both ends are lifted exactly one layer, so a target that is a record,
+        # a nil or an Option all delegate, and a delegated reader that answers
+        # an Option comes back as one Option rather than two. The call is
+        # written out rather than sent, so the target's method is reached on
+        # the same terms a caller would reach it on.
         def define_optional_delegation(to, method_name, reader)
           class_eval <<-RUBY, __FILE__, __LINE__ + 1
             def #{reader}(...)
-              #{to}.map { |target| target.#{method_name}(...) }
+              #{to}.to_option.and_then { |target| target.#{method_name}(...).to_option }
             end
           RUBY
         end

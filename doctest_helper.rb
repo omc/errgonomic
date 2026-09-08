@@ -65,6 +65,22 @@ class Article < ActiveRecord::Base
   delegate_optional :greeting, :styled_name, to: :author, prefix: true
 end
 
+# The same records read through a converted model, so the target's own
+# reader is already an Option.
+class Byline < ActiveRecord::Base
+  self.table_name = 'authors'
+  include Errgonomic::Rails::ActiveRecordOptional
+end
+
+# Unconverted, so the association reader hands back a plain record or nil.
+class Draft < ActiveRecord::Base
+  self.table_name = 'articles'
+  belongs_to :author, optional: true
+  belongs_to :byline, class_name: 'Byline', foreign_key: :author_id, optional: true
+  delegate_optional :name, to: :author, prefix: true
+  delegate_optional :name, to: :byline, prefix: true
+end
+
 # Two validators that answer differently for the same wrapped value.
 class Memo < ActiveRecord::Base
   self.table_name = 'notes'
