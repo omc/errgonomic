@@ -75,8 +75,9 @@ module Errgonomic
       # does serde unless a field asks otherwise, so a None does too.
       #
       # @example
-      #   Note.new(title: Some('The Dark Forest')).as_json['title'] # => 'The Dark Forest'
-      #   Note.new.as_json['title'] # => nil
+      #   note = Note.create!(title: Some('The Dark Forest'))
+      #   Note.find(note.id).as_json['title'] # => 'The Dark Forest'
+      #   Note.find(note.id).as_json.fetch('body') # => nil
       def read_attribute_for_serialization(key)
         Errgonomic::Rails.unwrap_option(super)
       end
