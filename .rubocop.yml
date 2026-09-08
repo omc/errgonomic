@@ -47,3 +47,7 @@ Metrics/MethodLength:
   Exclude:
     - lib/errgonomic/rails/active_record_optional.rb
     - test/**/*
+Metrics/ModuleLength:
+  Exclude:
+    - lib/errgonomic/rails/active_record_optional.rb
+    - test/**/*

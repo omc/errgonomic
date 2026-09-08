@@ -210,6 +210,38 @@ class VendorLedger < ActiveRecord::Base
   self.table_name = 'magazines'
 end
 
+# A model's own reader has to survive the wrapping and reach the Option
+# through super. These two differ only in where the defs sit relative to the
+# include and to the association macro.
+class PrefacedBook < ActiveRecord::Base
+  self.table_name = 'books'
+
+  def isbn
+    super.unwrap_or('unassigned')
+  end
+
+  def author
+    super.map(&:name)
+  end
+
+  belongs_to :author, optional: true
+  include Errgonomic::Rails::ActiveRecordOptional
+end
+
+class AnnotatedBook < ActiveRecord::Base
+  self.table_name = 'books'
+  include Errgonomic::Rails::ActiveRecordOptional
+  belongs_to :author, optional: true
+
+  def isbn
+    super.unwrap_or('unassigned')
+  end
+
+  def author
+    super.map(&:name)
+  end
+end
+
 class BugTest < Minitest::Test
   def test_optional_attributes
     author = Author.create!(name: 'Cixin Liu')
@@ -522,6 +554,35 @@ class BugTest < Minitest::Test
 
     assert_equal 'abc123', credential.access_key
     assert_equal 'shhh', credential.access_secret.unwrap!
+  end
+
+  # A wrapped reader and a model's own def of the same name must coexist:
+  # the model's def wins and reaches the wrapper through super, whether it
+  # is written above the include or below it.
+  def test_a_column_reader_defined_before_the_include_composes_with_the_wrapper
+    assert_equal 'unassigned', PrefacedBook.create!(title: 'Supernova Era').isbn
+    assert_equal '9780765377104', PrefacedBook.create!(title: 'Death\'s End', isbn: '9780765377104').isbn
+  end
+
+  def test_a_column_reader_defined_after_the_include_composes_with_the_wrapper
+    assert_equal 'unassigned', AnnotatedBook.create!(title: 'Supernova Era').isbn
+    assert_equal '9780765377104', AnnotatedBook.create!(title: 'Death\'s End', isbn: '9780765377104').isbn
+  end
+
+  # An association reader written below its macro used to replace the
+  # wrapper outright, leaving the model with a mixed contract.
+  def test_an_association_reader_defined_before_the_macro_composes_with_the_wrapper
+    author = Author.create!(name: 'Cixin Liu')
+
+    assert_equal 'Cixin Liu', PrefacedBook.create!(title: 'The Dark Forest', author_id: author.id).author.unwrap!
+    assert PrefacedBook.create!(title: 'Supernova Era').author.none?
+  end
+
+  def test_an_association_reader_defined_after_the_macro_composes_with_the_wrapper
+    author = Author.create!(name: 'Cixin Liu')
+
+    assert_equal 'Cixin Liu', AnnotatedBook.create!(title: 'The Dark Forest', author_id: author.id).author.unwrap!
+    assert AnnotatedBook.create!(title: 'Supernova Era').author.none?
   end
 
   private

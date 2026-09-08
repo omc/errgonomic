@@ -32,6 +32,7 @@ module Errgonomic
       extend ActiveSupport::Concern
 
       included do
+        errgonomic_optional_readers
         reflect_on_all_associations(:belongs_to)
           .select { |r| r.options[:optional] }
           .each { |r| errgonomic_wrap_optional(r.name) }
@@ -41,6 +42,28 @@ module Errgonomic
       end
 
       class_methods do
+        # Wrapped readers live in a module of their own, the way ActiveRecord
+        # keeps its attribute methods, so a model's own def of the same name
+        # coexists with the wrapper instead of one silently replacing the
+        # other. Included rather than prepended: the model's def wins, and
+        # its super reads the Option.
+        def errgonomic_optional_readers
+          return @errgonomic_optional_readers if defined?(@errgonomic_optional_readers)
+
+          @errgonomic_optional_readers = const_set(:ErrgonomicOptionalReaders, Module.new)
+          private_constant :ErrgonomicOptionalReaders
+          include @errgonomic_optional_readers
+          @errgonomic_optional_readers
+        end
+
+        # Every class gets its module before its body runs, so where a reader
+        # sits in the ancestor chain never depends on when the schema loads
+        # or where the include was written.
+        def inherited(subclass)
+          super
+          subclass.errgonomic_optional_readers
+        end
+
         # What a model wrapped is the signal that a conversion did what it
         # meant to, and the columns are not wrapped until the schema loads, so
         # asking loads it.
@@ -164,7 +187,7 @@ module Errgonomic
           names.map(&:to_s).each do |name|
             next unless errgonomic_optional_names.delete(name)
 
-            remove_method(name)
+            errgonomic_optional_readers.remove_method(name)
           end
         end
 
@@ -174,7 +197,7 @@ module Errgonomic
           return if errgonomic_optional_exclusions.include?(name) || errgonomic_optional?(name)
 
           errgonomic_optional_names << name
-          class_eval <<-RUBY, __FILE__, __LINE__ + 1
+          errgonomic_optional_readers.module_eval <<-RUBY, __FILE__, __LINE__ + 1
             def #{name}
               reads = Thread.current[:errgonomic_optional_reads] ||= {}
               key = [object_id, :#{name}]
