@@ -1,10 +1,11 @@
 plugins: rubocop-yard
 
 # Doctest expectation lines are executable spec; wrapping them would change
-# the assertions. Long lines carrying a `#=>` expectation are allowed.
+# the assertions. Long lines carrying a `# =>` expectation are allowed, in
+# either of the two spacings the examples use.
 Layout/LineLength:
   AllowedPatterns:
-    - "#=>"
+    - '#\s*=>'
 
 # Some(), None(), Ok() and Err() are the library's Rust-style value
 # constructors; their capitalized names are the point.
