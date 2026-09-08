@@ -63,6 +63,7 @@ class Article < ActiveRecord::Base
   delegate_optional :name, to: :author, prefix: :writer
   delegate_optional :bio, to: :author
   delegate_optional :greeting, :styled_name, to: :author, prefix: true
+  delegate_optional :table_name, to: :class
 end
 
 # The same records read through a converted model, so the target's own

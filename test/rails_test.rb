@@ -210,6 +210,20 @@ class Compendium < ActiveRecord::Base
   delegate_optional :greeting, :transformed_name, to: :author, prefix: true
 end
 
+# Targets named for Ruby keywords: the delegation has to reach them through
+# an explicit receiver.
+class Edition < ActiveRecord::Base
+  self.table_name = 'books'
+  include Errgonomic::Rails::ActiveRecordOptional
+  delegate_optional :table_name, to: :class, prefix: true
+
+  def next
+    Edition.where('id > ?', id).order(:id).first
+  end
+
+  delegate_optional :title, to: :next, prefix: true
+end
+
 # delegate_optional is available on every model, so it has to work over an
 # association reader that hands back a plain record or nil.
 class Bulletin < ActiveRecord::Base
@@ -1009,6 +1023,17 @@ class BugTest < Minitest::Test
 
     assert_equal 'Cixin Liu', almanac.acct_name.unwrap!
     assert_equal 'the almanac itself', almanac.name
+  end
+
+  # A target named for a Ruby keyword reads as the keyword in the body the
+  # delegation is written into.
+  def test_a_target_named_for_a_ruby_keyword_delegates
+    first = Edition.create!(title: 'Omelas')
+    second = Edition.create!(title: 'Semley')
+
+    assert_equal 'books', first.class_table_name.unwrap!
+    assert_equal 'Semley', first.next_title.unwrap!
+    assert second.next_title.none?
   end
 
   # A delegation passes on whatever the caller handed it: positional

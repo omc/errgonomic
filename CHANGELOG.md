@@ -21,6 +21,7 @@
 - `delegate_optional` lifts its target instead of assuming an Option, so a model delegates whether or not it has converted: a plain record reads as `Some`, a nil target as `None`, and a `None` target stays `None`, where 0.8.x raised `NoMethodError` on `map` for anything but an Option. It lifts one layer at each end, so a delegated reader that answers an Option comes back as one Option rather than two
 - `delegate_optional` accepts `allow_nil: true` as a no-op, so a `delegate` declaration swaps over unchanged, and raises `ArgumentError` on `allow_nil: false`, which asks for something a reader answering an Option cannot do. A declaration with no `to:` raises where it is written, with Rails' wording, where 0.8.x returned silently and defined nothing
 - A `delegate_optional` reader is defined against the file and line of the declaration, so a backtrace through it and `instance_method(:reader).source_location` name the model rather than the gem
+- `delegate_optional :model_name, to: :class` and any other target named for a Ruby keyword reach the target through an explicit receiver, where the generated body used to read as the keyword and raise `SyntaxError` as the model loaded
 - [Dev, Test] - Doctests run against an in-memory ActiveRecord connection, so an `@example` under `lib/errgonomic/rails` specifies the integration the same way every other example specifies the core
 
 ## [0.4.1] - 2025-02-20

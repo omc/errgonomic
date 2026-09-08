@@ -22,6 +22,8 @@ module Errgonomic
       #     article.author_greeting('Hello') # => Some('Hello, Ursula.')
       #     article.author_greeting('Hi', punctuation: '!') # => Some('Hi, Ursula!')
       #     article.author_styled_name(&:upcase) # => Some('URSULA')
+      #   @example a target named for a Ruby keyword is reached through self
+      #     Article.create!(title: 'Omelas').table_name # => Some('articles')
       #   @example the target is lifted, and an Option it hands back is not nested
       #     draft = Draft.create!(title: 'Omelas', author_id: Author.create!(name: 'Ursula').id)
       #     draft.author_name # => Some('Ursula')
@@ -113,9 +115,10 @@ module Errgonomic
           complaint = delegate_optional_complaint(to, prefix, allow_nil)
           raise ::ArgumentError, complaint if complaint
 
+          receiver = delegate_optional_receiver(to)
           methods.each do |method_name|
             reader = "#{delegate_optional_prefix(to, prefix)}#{method_name}"
-            define_optional_delegation(to, method_name, reader, declared_at)
+            define_optional_delegation(receiver, method_name, reader, declared_at)
             send(:private, reader) if private
           end
         end
@@ -125,12 +128,21 @@ module Errgonomic
         # The call is written out rather than sent, so the target's method is
         # reached on the same terms a caller would reach it on, and the reader
         # takes the declaration's file and line so a backtrace names the model.
-        def define_optional_delegation(to, method_name, reader, declared_at)
+        def define_optional_delegation(receiver, method_name, reader, declared_at)
           class_eval <<-RUBY, declared_at.path, declared_at.lineno # rubocop:disable Style/EvalWithLocation
             def #{reader}(...)
-              #{to}.to_option.and_then { |target| target.#{method_name}(...).to_option }
+              #{receiver}.to_option.and_then { |target| target.#{method_name}(...).to_option }
             end
           RUBY
+        end
+
+        # A target named for a Ruby keyword reads as the keyword in the body
+        # it is written into, so it needs an explicit receiver. Rails answers
+        # the same question for delegate, and answers it for the same names.
+        def delegate_optional_receiver(to)
+          return to.to_s unless ::ActiveSupport::Delegation::RESERVED_METHOD_NAMES.include?(to.to_s)
+
+          "self.#{to}"
         end
 
         # true asks for the target's own name; any other prefix is the name.
