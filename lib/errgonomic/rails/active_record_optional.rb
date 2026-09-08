@@ -33,15 +33,18 @@ module Errgonomic
     #    question of any model, converted or not.
     # 5. Where ActiveRecord's own machinery reads a value raw, it gets one.
     #    Validation unwraps at read_attribute_for_validation, the seam every
-    #    EachValidator fetches an attribute through, so a standard validator
-    #    weighs the value rather than the wrapper. A singular association with
-    #    nested attributes goes further and keeps its plain reader: nested
-    #    attributes are assigned through the reader, and ActiveRecord asks
-    #    whatever it finds there whether it is a new record.
+    #    EachValidator fetches an attribute through, and serialization at
+    #    read_attribute_for_serialization, the seam every attribute in a
+    #    payload is fetched through, so a standard validator weighs the value
+    #    and a payload carries it rather than the wrapper. A singular
+    #    association with nested attributes goes further and keeps its plain
+    #    reader: nested attributes are assigned through the reader, and
+    #    ActiveRecord asks whatever it finds there whether it is a new record.
     #
-    # errgonomic_optional_except is not on the list: it is configuration, an
-    # escape hatch for whatever conflict shows up next, not a semantic
-    # exception.
+    # errgonomic_optional_except and errgonomic_serialize_none are not on the
+    # list: they are configuration, an escape hatch for whatever conflict
+    # shows up next and a choice of how an absent value is written, not
+    # semantic exceptions.
     module ActiveRecordOptional
       extend ActiveSupport::Concern
 
@@ -64,6 +67,33 @@ module Errgonomic
       #   Memo.new(title: Some(''), body: Some('')).tap(&:valid?).errors[:body] # => []
       def read_attribute_for_validation(key)
         Errgonomic::Rails.unwrap_option(super)
+      end
+
+      # Every attribute in a serialized payload is fetched through here, so a
+      # converted model's as_json, to_json and serializable_hash say what the
+      # unconverted one says. Rails writes an absent value as null, and so
+      # does serde unless a field asks otherwise, so a None does too.
+      #
+      # @example
+      #   note = Note.create!(title: Some('The Dark Forest'))
+      #   Note.find(note.id).as_json['title'] # => 'The Dark Forest'
+      #   Note.find(note.id).as_json.fetch('body') # => nil
+      def read_attribute_for_serialization(key)
+        Errgonomic::Rails.unwrap_option(super)
+      end
+
+      # A method named in methods: is read off the record rather than through
+      # the attribute seam, so a wrapped reader named there arrives wrapped.
+      #
+      # @example
+      #   Note.new(title: Some('Wanderer')).serializable_hash(only: [], methods: :title) # => { 'title' => 'Wanderer' }
+      def serializable_hash(options = nil)
+        hash = super
+        Array(options.to_h[:methods]).each do |name|
+          key = name.to_s
+          hash[key] = Errgonomic::Rails.unwrap_option(hash[key]) if hash.key?(key)
+        end
+        errgonomic_omit_absent_keys(hash)
       end
 
       class_methods do
@@ -117,6 +147,17 @@ module Errgonomic
           inherited |
             Array(try(:errgonomic_optional_exceptions)).map(&:to_s) |
             errgonomic_nested_attribute_associations
+        end
+
+        # A wrapped reader whose absent value the declaration in force asks
+        # to be left out of a payload rather than written as null.
+        def errgonomic_serialize_none_omit?(name)
+          declaration = errgonomic_serialize_none_declaration
+          return false unless declaration && declaration[:mode] == :omit
+          return declaration[:only].include?(name) if declaration[:only]
+          return declaration[:except].exclude?(name) if declaration[:except]
+
+          true
         end
 
         # A model that keeps value-or-nil throughout, for whatever the
@@ -231,6 +272,30 @@ module Errgonomic
               val.to_option
             end
           RUBY
+        end
+      end
+
+      private
+
+      # ActiveModel reads an included association off the record, so what it
+      # yields is an Option. Take the record out of it, and leave an absent
+      # one out of the payload, where a nil association is already left out.
+      def serializable_add_includes(options = {})
+        super do |association, records, opts|
+          records = Errgonomic::Rails.unwrap_option(records)
+          yield association, records, opts unless records.nil?
+        end
+      end
+
+      # Deleting from the payload rather than from the attribute list is what
+      # keeps the caller's own only: and except: in force. A wrapped reader
+      # never holds Some(nil), so a nil here is the None it was declared for.
+      def errgonomic_omit_absent_keys(hash)
+        klass = self.class
+        return hash unless klass.errgonomic_serialize_none_declaration&.fetch(:mode) == :omit
+
+        hash.delete_if do |key, value|
+          value.nil? && klass.errgonomic_optional?(key) && klass.errgonomic_serialize_none_omit?(key)
         end
       end
     end

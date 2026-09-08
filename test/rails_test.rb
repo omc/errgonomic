@@ -447,6 +447,83 @@ class ProfiledAuthor < ActiveRecord::Base
   validates :profile, presence: true
 end
 
+# Serialization twins over one row: what a conversion changes about a payload
+# is whatever these two disagree about.
+class SerializedBook < ActiveRecord::Base
+  self.table_name = 'books'
+  include Errgonomic::Rails::ActiveRecordOptional
+  belongs_to :author, optional: true, class_name: 'SerializedAuthor'
+
+  def display_isbn
+    isbn.unwrap_or('unassigned')
+  end
+end
+
+class SerializedAuthor < ActiveRecord::Base
+  self.table_name = 'authors'
+  include Errgonomic::Rails::ActiveRecordOptional
+  has_many :books, class_name: 'SerializedBook', foreign_key: :author_id
+end
+
+class PlainBook < ActiveRecord::Base
+  self.table_name = 'books'
+  belongs_to :author, optional: true, class_name: 'PlainAuthor'
+
+  def display_isbn
+    isbn || 'unassigned'
+  end
+end
+
+class PlainAuthor < ActiveRecord::Base
+  self.table_name = 'authors'
+  has_many :books, class_name: 'PlainBook', foreign_key: :author_id
+end
+
+# Omission is the opt-in, and an application's own base class is where it is
+# declared once for every model below.
+class TerseRecord < ActiveRecord::Base
+  self.abstract_class = true
+  include Errgonomic::Rails::ActiveRecordOptional
+  errgonomic_serialize_none :omit
+end
+
+class TerseBook < TerseRecord
+  self.table_name = 'books'
+  belongs_to :author, optional: true, class_name: 'SerializedAuthor'
+
+  # A plain method is not a reader a declaration governs, whatever it answers.
+  def blurb
+    nil
+  end
+end
+
+# A model below the declaration names the other mode, and gets what a model
+# with no declaration anywhere gets.
+class VerboseBook < TerseRecord
+  self.table_name = 'books'
+  errgonomic_serialize_none :null
+end
+
+# only: and except: scope the mode to named readers, and a reader outside the
+# scope keeps the default.
+class SelectiveBook < TerseRecord
+  self.table_name = 'books'
+  errgonomic_serialize_none :omit, only: %i[isbn]
+end
+
+class ExceptedBook < TerseRecord
+  self.table_name = 'books'
+  errgonomic_serialize_none :omit, except: %i[isbn]
+end
+
+# Rails convention puts a concern at the top of a model, but configuration
+# reads as well above the include as below it, so it has to work either way.
+class EarlyTerseBook < ActiveRecord::Base
+  self.table_name = 'books'
+  errgonomic_serialize_none :omit
+  include Errgonomic::Rails::ActiveRecordOptional
+end
+
 class BugTest < Minitest::Test
   def test_optional_attributes
     author = Author.create!(name: 'Cixin Liu')
@@ -529,6 +606,7 @@ class BugTest < Minitest::Test
   # Hash and Array serialization recurses with as_json, never to_json, so
   # the refusal has to sit on as_json to survive nesting.
   def test_nested_options_and_results_refuse_to_serialize
+    assert_raises(Errgonomic::SerializeError) { Some(5).to_json }
     assert_raises(Errgonomic::SerializeError) { Some(5).as_json }
     assert_raises(Errgonomic::SerializeError) { { a: Some(5) }.to_json }
     assert_raises(Errgonomic::SerializeError) { { a: None() }.to_json }
@@ -536,6 +614,174 @@ class BugTest < Minitest::Test
     assert_raises(Errgonomic::SerializeError) { Ok(5).as_json }
     assert_raises(Errgonomic::SerializeError) { { a: Err(5) }.to_json }
     assert_raises(Errgonomic::SerializeError) { [Ok(5)].to_json }
+  end
+
+  # A conversion changes what a reader returns, not what a record serializes:
+  # the payload has to match the model that was never converted, key for key.
+  def test_a_converted_record_serializes_as_the_unconverted_one_does
+    author = Author.create!(name: 'Cixin Liu')
+    row = Book.create!(title: 'The Dark Forest', isbn: '9780765377104', author_id: author.id)
+
+    assert_equal PlainBook.find(row.id).serializable_hash, SerializedBook.find(row.id).serializable_hash
+    assert_equal PlainBook.find(row.id).as_json, SerializedBook.find(row.id).as_json
+    assert_equal PlainBook.find(row.id).to_json, SerializedBook.find(row.id).to_json
+  end
+
+  # Rails writes an absent value as null, and so does serde unless a field
+  # asks otherwise, so a None does too and no declaration is needed to say so.
+  def test_a_none_serializes_as_null
+    row = Book.create!(title: 'Supernova Era')
+
+    assert_equal PlainBook.find(row.id).as_json, SerializedBook.find(row.id).as_json
+    assert_nil SerializedBook.find(row.id).as_json['isbn']
+    assert_includes SerializedBook.find(row.id).to_json, '"isbn":null'
+  end
+
+  # ActiveSupport recurses through as_json, so a record inside an ordinary
+  # payload serializes the way the record itself does.
+  def test_a_converted_record_serializes_inside_a_payload
+    row = Book.create!(title: 'The Dark Forest')
+
+    assert_equal({ book: PlainBook.find(row.id) }.to_json, { book: SerializedBook.find(row.id) }.to_json)
+    assert_equal [PlainBook.find(row.id)].to_json, [SerializedBook.find(row.id)].to_json
+  end
+
+  # An included association is fetched through its reader, so a Some
+  # serializes as the record's own hash and a None leaves the key out, which
+  # is what a nil association does on a model that was never converted.
+  def test_an_included_association_serializes_through_the_option
+    author = Author.create!(name: 'Cixin Liu')
+    shelved = Book.create!(title: 'The Dark Forest', author_id: author.id)
+    unshelved = Book.create!(title: 'Supernova Era')
+
+    assert_equal PlainBook.find(shelved.id).as_json(include: :author),
+                 SerializedBook.find(shelved.id).as_json(include: :author)
+    assert_equal 'Cixin Liu', SerializedBook.find(shelved.id).as_json(include: :author).dig('author', 'name')
+
+    assert_equal PlainBook.find(unshelved.id).as_json(include: :author),
+                 SerializedBook.find(unshelved.id).as_json(include: :author)
+    refute_includes SerializedBook.find(unshelved.id).as_json(include: :author), 'author'
+  end
+
+  # A collection is never an Option, so an included has_many is untouched.
+  def test_an_included_has_many_serializes_untouched
+    author = Author.create!(name: 'Cixin Liu')
+    Book.create!(title: 'The Dark Forest', author_id: author.id)
+
+    assert_equal PlainAuthor.find(author.id).as_json(include: :books),
+                 SerializedAuthor.find(author.id).as_json(include: :books)
+    titles = SerializedAuthor.find(author.id).as_json(include: :books)['books'].map { |book| book['title'] }
+
+    assert_equal ['The Dark Forest'], titles
+  end
+
+  # methods: reads its value straight off the record rather than through the
+  # attribute seam, so a wrapped reader named there unwraps one layer and a
+  # method that hands back a plain value is left alone.
+  def test_a_serialized_method_unwraps_one_layer
+    row = Book.create!(title: 'The Dark Forest', isbn: '9780765377104')
+
+    assert_equal PlainBook.find(row.id).as_json(methods: :display_isbn),
+                 SerializedBook.find(row.id).as_json(methods: :display_isbn)
+    assert_equal '9780765377104', SerializedBook.find(row.id).as_json(methods: :isbn)['isbn']
+    assert_equal '9780765377104', SerializedBook.find(row.id).serializable_hash(methods: :isbn)['isbn']
+    assert_nil SerializedBook.create!(title: 'Supernova Era').serializable_hash(methods: :isbn)['isbn']
+  end
+
+  # Omission is the opt-in, and it drops only the keys the record has no
+  # value for: a Some is a value like any other.
+  def test_omit_drops_the_keys_a_record_has_no_value_for
+    absent = TerseBook.find(Book.create!(title: 'Supernova Era').id).as_json
+    present = TerseBook.find(Book.create!(title: 'The Dark Forest', isbn: '9780765377104').id).as_json
+
+    refute_includes absent, 'isbn'
+    refute_includes absent, 'published_at'
+    assert_equal 'Supernova Era', absent['title']
+
+    assert_equal '9780765377104', present['isbn']
+    refute_includes present, 'published_at'
+  end
+
+  # A declaration above the include says the same thing as one below it.
+  def test_serialize_none_is_declared_on_either_side_of_the_include
+    hash = EarlyTerseBook.find(Book.create!(title: 'Supernova Era').id).as_json
+
+    refute_includes hash, 'isbn'
+    assert_equal 'Supernova Era', hash['title']
+  end
+
+  # Omission governs by reader name wherever the key came from, so a methods:
+  # entry naming a wrapped reader goes the way the reader does.
+  def test_omit_governs_a_method_entry_by_reader_name
+    hash = TerseBook.find(Book.create!(title: 'Supernova Era').id).as_json(methods: %i[isbn blurb])
+
+    refute_includes hash, 'isbn'
+    assert_nil hash.fetch('blurb')
+  end
+
+  # A model below the declaration says :null and is back to the default.
+  def test_a_subclass_declares_its_way_back_to_null
+    row = Book.create!(title: 'Supernova Era')
+
+    assert_equal PlainBook.find(row.id).as_json, VerboseBook.find(row.id).as_json
+  end
+
+  # A scoped declaration replaces the one it inherits, so a reader it does
+  # not name keeps the default rather than the mode above it.
+  def test_omit_scoped_to_named_readers
+    row = Book.create!(title: 'Supernova Era')
+    only = SelectiveBook.find(row.id).as_json
+    except = ExceptedBook.find(row.id).as_json
+
+    refute_includes only, 'isbn'
+    assert_nil only.fetch('published_at')
+
+    assert_nil except.fetch('isbn')
+    refute_includes except, 'published_at'
+  end
+
+  # An absent association is left out of a payload either way, and a present
+  # one is its record's hash either way.
+  def test_omit_leaves_an_absent_association_out
+    author = Author.create!(name: 'Cixin Liu')
+    shelved = Book.create!(title: 'The Dark Forest', author_id: author.id)
+    unshelved = Book.create!(title: 'Supernova Era')
+
+    refute_includes TerseBook.find(unshelved.id).as_json(include: :author), 'author'
+    assert_equal 'Cixin Liu', TerseBook.find(shelved.id).as_json(include: :author).dig('author', 'name')
+  end
+
+  # A mode the concern does not know would be a silent no-op, so it is
+  # refused where it is written.
+  def test_an_unknown_serialize_none_mode_is_refused
+    error = assert_raises(ArgumentError) { declare_serialize_none(:skip) }
+
+    assert_match(/:null or :omit/, error.message)
+  end
+
+  # Two scopes in one declaration cannot both be the set it applies to.
+  def test_only_and_except_together_are_refused
+    error = assert_raises(ArgumentError) { declare_serialize_none(:omit, only: %i[isbn], except: %i[genre_id]) }
+
+    assert_match(/not both/, error.message)
+  end
+
+  # A declaration replaces the one it inherits, so a scoped :null asks for
+  # the default on the readers it names and the default on the rest, which
+  # is no request at all.
+  def test_a_scoped_null_is_refused
+    only = assert_raises(ArgumentError) { declare_serialize_none(:null, only: %i[isbn]) }
+    except = assert_raises(ArgumentError) { declare_serialize_none(:null, except: %i[isbn]) }
+
+    assert_match(/declare :omit/, only.message)
+    assert_match(/declare :omit/, except.message)
+  end
+
+  # A model that keeps value-or-nil throughout has nothing to unwrap.
+  def test_an_opted_out_model_serializes_unchanged
+    row = Zine.create!(title: 'Wired', issn: '1059-1028')
+
+    assert_equal VendorLedger.find(row.id).as_json, PlainZine.find(row.id).as_json
   end
 
   # to_option lifts a value that may be nil. An Option is already lifted, and
@@ -1374,6 +1620,13 @@ class BugTest < Minitest::Test
   end
 
   private
+
+  def declare_serialize_none(mode, **scope)
+    Class.new(ActiveRecord::Base) do
+      self.table_name = 'books'
+      errgonomic_serialize_none(mode, **scope)
+    end
+  end
 
   def capture_stderr
     original = $stderr

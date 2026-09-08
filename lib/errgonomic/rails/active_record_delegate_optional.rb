@@ -25,6 +25,47 @@ module Errgonomic
             superclass.respond_to?(:errgonomic_optional_exceptions) ? superclass.errgonomic_optional_exceptions.dup : []
         end
 
+        # How a None reaches a payload. :null writes it as null, which is
+        # what Rails does with nil and what serde does with None unless a
+        # field asks otherwise, so it is the default and needs no
+        # declaration. :omit leaves the key out instead. only: and except:
+        # scope the mode to named readers, and a reader outside the scope
+        # keeps the default. Configuration reads as well above the include
+        # as below it, so it lives here rather than in the concern.
+        def errgonomic_serialize_none(mode, only: nil, except: nil)
+          complaint = errgonomic_serialize_none_complaint(mode, only, except)
+          raise ::ArgumentError, "errgonomic_serialize_none #{complaint}" if complaint
+
+          @errgonomic_serialize_none = {
+            mode: mode,
+            only: only && Array(only).map(&:to_s),
+            except: except && Array(except).map(&:to_s)
+          }
+        end
+
+        # The nearest declaration is the whole story for a class: it replaces
+        # whatever it inherits rather than layering onto it, so a scoped one
+        # leaves every reader it does not name at the default.
+        def errgonomic_serialize_none_declaration
+          return @errgonomic_serialize_none if defined?(@errgonomic_serialize_none)
+          return nil unless superclass.respond_to?(:errgonomic_serialize_none_declaration)
+
+          superclass.errgonomic_serialize_none_declaration
+        end
+
+        # A declaration that cannot change what a payload looks like is a
+        # mistake rather than a no-op, so say what to write instead. :null is
+        # already what every unnamed reader gets, so scoping it names one set
+        # of readers for the default and leaves the rest at the default too.
+        def errgonomic_serialize_none_complaint(mode, only, except)
+          return "takes :null or :omit, not #{mode.inspect}" unless %i[null omit].include?(mode)
+          return 'takes only: or except:, not both; name the readers on one of them' if only && except
+          return unless mode == :null && (only || except)
+
+          ':null is the default for every reader and takes no only: or except:; ' \
+            'declare :omit on the readers to leave out'
+        end
+
         def delegate_optional(*methods, to: nil, prefix: nil, private: nil)
           return if to.nil?
 
