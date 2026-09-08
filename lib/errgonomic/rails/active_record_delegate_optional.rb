@@ -33,9 +33,8 @@ module Errgonomic
         # keeps the default. Configuration reads as well above the include
         # as below it, so it lives here rather than in the concern.
         def errgonomic_serialize_none(mode, only: nil, except: nil)
-          unless %i[null omit].include?(mode)
-            raise ::ArgumentError, "errgonomic_serialize_none takes :null or :omit, not #{mode.inspect}"
-          end
+          complaint = errgonomic_serialize_none_complaint(mode, only, except)
+          raise ::ArgumentError, "errgonomic_serialize_none #{complaint}" if complaint
 
           @errgonomic_serialize_none = {
             mode: mode,
@@ -52,6 +51,19 @@ module Errgonomic
           return nil unless superclass.respond_to?(:errgonomic_serialize_none_declaration)
 
           superclass.errgonomic_serialize_none_declaration
+        end
+
+        # A declaration that cannot change what a payload looks like is a
+        # mistake rather than a no-op, so say what to write instead. :null is
+        # already what every unnamed reader gets, so scoping it names one set
+        # of readers for the default and leaves the rest at the default too.
+        def errgonomic_serialize_none_complaint(mode, only, except)
+          return "takes :null or :omit, not #{mode.inspect}" unless %i[null omit].include?(mode)
+          return 'takes only: or except:, not both; name the readers on one of them' if only && except
+          return unless mode == :null && (only || except)
+
+          ':null is the default for every reader and takes no only: or except:; ' \
+            'declare :omit on the readers to leave out'
         end
 
         def delegate_optional(*methods, to: nil, prefix: nil, private: nil)

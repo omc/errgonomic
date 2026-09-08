@@ -740,15 +740,27 @@ class BugTest < Minitest::Test
   # A mode the concern does not know would be a silent no-op, so it is
   # refused where it is written.
   def test_an_unknown_serialize_none_mode_is_refused
-    error = assert_raises(ArgumentError) do
-      Class.new(ActiveRecord::Base) do
-        self.table_name = 'books'
-        include Errgonomic::Rails::ActiveRecordOptional
-        errgonomic_serialize_none :skip
-      end
-    end
+    error = assert_raises(ArgumentError) { declare_serialize_none(:skip) }
 
     assert_match(/:null or :omit/, error.message)
+  end
+
+  # Two scopes in one declaration cannot both be the set it applies to.
+  def test_only_and_except_together_are_refused
+    error = assert_raises(ArgumentError) { declare_serialize_none(:omit, only: %i[isbn], except: %i[genre_id]) }
+
+    assert_match(/not both/, error.message)
+  end
+
+  # A declaration replaces the one it inherits, so a scoped :null asks for
+  # the default on the readers it names and the default on the rest, which
+  # is no request at all.
+  def test_a_scoped_null_is_refused
+    only = assert_raises(ArgumentError) { declare_serialize_none(:null, only: %i[isbn]) }
+    except = assert_raises(ArgumentError) { declare_serialize_none(:null, except: %i[isbn]) }
+
+    assert_match(/declare :omit/, only.message)
+    assert_match(/declare :omit/, except.message)
   end
 
   # A model that keeps value-or-nil throughout has nothing to unwrap.
@@ -1594,6 +1606,13 @@ class BugTest < Minitest::Test
   end
 
   private
+
+  def declare_serialize_none(mode, **scope)
+    Class.new(ActiveRecord::Base) do
+      self.table_name = 'books'
+      errgonomic_serialize_none(mode, **scope)
+    end
+  end
 
   def capture_stderr
     original = $stderr
