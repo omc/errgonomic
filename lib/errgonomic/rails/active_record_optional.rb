@@ -373,3 +373,53 @@ module Errgonomic
 end
 
 ActiveRecord::Associations::SingularAssociation.prepend(Errgonomic::Rails::ActiveRecordSingularAssociationWriter)
+
+module Errgonomic
+  module Rails
+    # An attribute writer hands its value to a type cast that has never heard
+    # of an Option, and each type fails its own way: a Some is truthy and not
+    # one of ActiveModel's FALSE_VALUES, so a wrapped false cast to true.
+    # Unwrap before the attribute is built rather than inside the cast, so the
+    # value assigned, dirty tracking and the before-type-cast reader all agree
+    # on what was assigned. Every writer passes here, as do new,
+    # assign_attributes and update.
+    module ActiveModelAttributeWrite
+      # @example
+      #   Note.new(pinned: Some(false)).pinned # => Some(false)
+      #   Note.new(pinned: None()).pinned # => None()
+      #   Note.new(title: Some('The Dark Forest')).title # => Some('The Dark Forest')
+      #   Note.new(rank: Some(3)).rank # => Some(3)
+      #   Note.new(due_on: Some(Date.new(2026, 7, 31))).due_on # => Some(Date.new(2026, 7, 31))
+      #
+      # @example A wrapper never reaches the attribute behind the reader
+      #   Note.new(pinned: Some(false)).attributes['pinned'] # => false
+      #   Note.new(pinned: Some(false)).read_attribute_before_type_cast('pinned') # => false
+      def write_from_user(name, value)
+        super(name, Errgonomic::Rails.unwrap_options(value))
+      end
+    end
+  end
+end
+
+ActiveModel::AttributeSet.prepend(Errgonomic::Rails::ActiveModelAttributeWrite)
+
+module Errgonomic
+  module Rails
+    # Values that never pass an attribute writer are cast on their way to a
+    # bind parameter instead: update_all, insert_all and upsert each cast a
+    # hash of values against the column type, as does an attribute default.
+    # The cast is the one place they all share, so a Some casts as its inner
+    # value and a None as nil.
+    module ActiveModelTypeCast
+      # @example
+      #   ActiveModel::Type::Boolean.new.cast(Some(false)) # => false
+      #   ActiveModel::Type::String.new.cast(Some('The Dark Forest')) # => 'The Dark Forest'
+      #   ActiveModel::Type::Integer.new.cast(None()) # => nil
+      def cast(value)
+        super(Errgonomic::Rails.unwrap_options(value))
+      end
+    end
+  end
+end
+
+ActiveModel::Type::Value.prepend(Errgonomic::Rails::ActiveModelTypeCast)
