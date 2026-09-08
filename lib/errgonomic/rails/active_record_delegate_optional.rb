@@ -28,6 +28,20 @@ module Errgonomic
       #     draft.byline_name # => Some('Ursula')
       #     Draft.create!(title: 'Untitled').author_name # => None()
       #     Article.create!(title: 'Untitled').author_name # => None()
+      #   @example an absent target is a value here, so allow_nil: true says nothing new
+      #     Reprint.create!(title: 'Untitled').author_name # => None()
+      #     Reprint.create!(title: 'Untitled').respond_to?(:bio) # => false
+      #     begin
+      #       Class.new(Reprint) { delegate_optional :name, to: :author, allow_nil: false }
+      #     rescue ArgumentError => e
+      #       e.message
+      #     end # => 'delegate_optional reads an absent target as None; allow_nil: false asks for something else'
+      #   @example a delegation needs a target
+      #     begin
+      #       Class.new(Reprint) { delegate_optional :name }
+      #     rescue ArgumentError => e
+      #       e.message
+      #     end.start_with?("Delegation needs a target. Supply a keyword argument 'to'") # => true
       #   @example an automatic prefix needs a target it can name a method after
       #     begin
       #       Class.new(Article) { delegate_optional :name, to: :@author, prefix: true }
@@ -92,10 +106,8 @@ module Errgonomic
             'declare :omit on the readers to leave out'
         end
 
-        def delegate_optional(*methods, to: nil, prefix: nil, private: nil)
-          return if to.nil?
-
-          complaint = delegate_optional_complaint(to, prefix)
+        def delegate_optional(*methods, to: nil, prefix: nil, private: nil, allow_nil: nil)
+          complaint = delegate_optional_complaint(to, prefix, allow_nil)
           raise ::ArgumentError, complaint if complaint
 
           methods.each do |method_name|
@@ -126,11 +138,20 @@ module Errgonomic
         end
 
         # A declaration that cannot mean what it says is a mistake where it is
-        # written, rather than a method name nothing can call.
-        def delegate_optional_complaint(to, prefix)
-          return unless prefix == true && /^[^a-z_]/.match?(to.to_s)
+        # written, rather than a method name nothing can call or a reader that
+        # answers something other than what was asked for. allow_nil: true is
+        # what a delegation does here anyway, so a swap from delegate carries.
+        def delegate_optional_complaint(to, prefix, allow_nil)
+          if to.nil?
+            return "Delegation needs a target. Supply a keyword argument 'to' " \
+                   '(e.g. delegate_optional :hello, to: :greeter).'
+          end
+          if prefix == true && /^[^a-z_]/.match?(to.to_s)
+            return 'Can only automatically set the delegation prefix when delegating to a method.'
+          end
+          return unless allow_nil == false
 
-          'Can only automatically set the delegation prefix when delegating to a method.'
+          'delegate_optional reads an absent target as None; allow_nil: false asks for something else'
         end
       end
     end

@@ -81,6 +81,15 @@ class Draft < ActiveRecord::Base
   delegate_optional :name, to: :byline, prefix: true
 end
 
+# A mechanical swap from Rails' delegate carries allow_nil: true along, and
+# a delegation declared private stays off the public surface.
+class Reprint < ActiveRecord::Base
+  self.table_name = 'articles'
+  belongs_to :author, optional: true
+  delegate_optional :name, to: :author, prefix: true, allow_nil: true
+  delegate_optional :bio, to: :author, private: true
+end
+
 # Two validators that answer differently for the same wrapped value.
 class Memo < ActiveRecord::Base
   self.table_name = 'notes'
