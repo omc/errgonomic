@@ -346,3 +346,19 @@ module Errgonomic
 end
 
 ActiveRecord::PredicateBuilder.prepend(Errgonomic::Rails::ActiveRecordPredicateBuilder)
+
+module Errgonomic
+  module Rails
+    # A singular association writer is a setter, not a typed field, so it
+    # takes what a wrapped reader hands back: Some(record) assigns the record,
+    # None() clears the association. A Some of the wrong class still fails the
+    # association's own type check, naming the class inside it.
+    module ActiveRecordSingularAssociationWriter
+      def writer(value)
+        super(Errgonomic::Rails.unwrap_options(value))
+      end
+    end
+  end
+end
+
+ActiveRecord::Associations::SingularAssociation.prepend(Errgonomic::Rails::ActiveRecordSingularAssociationWriter)

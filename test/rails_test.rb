@@ -499,6 +499,70 @@ class BugTest < Minitest::Test
     assert_equal 0, Profile.where(author_id: author.id).count
   end
 
+  # A wrapped reader on one record is the ordinary source for a writer on
+  # another, so the writer takes the Option the reader hands back.
+  def test_belongs_to_writer_takes_an_option
+    author = Author.create!(name: 'Cixin Liu')
+    book = Book.create!(title: 'The Dark Forest')
+
+    book.author = Some(author)
+    book.save!
+
+    assert_equal author.id, book.reload.author_id.unwrap!
+
+    book.author = None()
+    book.save!
+
+    assert book.reload.author.none?
+  end
+
+  # Unwrapping is not a loosening of the type check: the wrong class inside a
+  # Some is still the wrong class, and the message says which one arrived.
+  def test_belongs_to_writer_rejects_a_some_of_the_wrong_class
+    book = Book.create!(title: 'The Dark Forest')
+    profile = Profile.create!(tagline: 'writes sci-fi')
+
+    error = assert_raises(ActiveRecord::AssociationTypeMismatch) { book.author = Some(profile) }
+
+    assert_match(/Author/, error.message)
+    assert_match(/Profile/, error.message)
+    refute_match(/Some/, error.message)
+  end
+
+  def test_has_one_writer_takes_an_option
+    author = Author.create!(name: 'Cixin Liu')
+
+    author.profile = Some(Profile.new(tagline: 'writes sci-fi'))
+
+    assert_equal 'writes sci-fi', author.reload.profile.unwrap!.tagline
+
+    author.profile = None()
+
+    assert author.reload.profile.none?
+  end
+
+  def test_has_one_writer_rejects_a_some_of_the_wrong_class
+    author = Author.create!(name: 'Cixin Liu')
+
+    error = assert_raises(ActiveRecord::AssociationTypeMismatch) { author.profile = Some(author) }
+
+    assert_match(/Profile/, error.message)
+    refute_match(/Some/, error.message)
+  end
+
+  # The idiom a conversion runs into everywhere: one record's association
+  # copied straight onto another's, through the wrapped reader.
+  def test_an_association_copied_from_a_wrapped_reader_round_trips
+    author = Author.create!(name: 'Cixin Liu')
+    book = Book.create!(title: 'The Dark Forest', author_id: author.id)
+    other_book = Book.create!(title: 'Death\'s End')
+
+    other_book.author = book.author
+    other_book.save!
+
+    assert_equal author, other_book.reload.author.unwrap!
+  end
+
   # ActiveRecord reads the association, asks it whether it is a new record,
   # and assigns through it, so the reader has to stay plain for the whole
   # nested-attributes cycle: build, update, and destroy.
