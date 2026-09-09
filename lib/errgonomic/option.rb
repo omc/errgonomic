@@ -454,12 +454,16 @@ module Errgonomic
       end
 
       # Maps the Option to another Option by applying a function to the
-      # contained value (if Some) or returns None. Raises a pedantic exception
-      # if the return value of the block is not an Option.
+      # contained value (if Some) or returns None. Whatever the block returns
+      # is wrapped, as in Rust: a block that returns an Option gives
+      # Some(Some(x)). and_then is the spelling for a block that returns an
+      # Option.
       #
       # @example
       #   Some(1).map { |x| x + 1 } # => Some(2)
       #   None().map { |x| x + 1 } # => None()
+      #   Some(1).map { |x| Some(x + 1) } # => Some(Some(2))
+      #   Some(1).and_then { |x| Some(x + 1) } # => Some(2)
       def map(&block)
         return self if none?
 

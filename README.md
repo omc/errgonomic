@@ -102,6 +102,8 @@ Some(1).ok_or("nope")            # => Ok(1)
 None().ok_or("nope")             # => Err("nope")
 ```
 
+`map` wraps whatever the block returns, as Rust's does, so a block that itself returns an Option gives `Some(Some(x))`. `and_then` is the spelling for that block.
+
 Options support pattern matching:
 
 ```ruby
