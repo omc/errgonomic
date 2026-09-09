@@ -13,6 +13,7 @@ require 'minitest/autorun'
 require 'logger'
 require 'stringio'
 require 'tmpdir'
+require 'fileutils'
 
 require_relative '../lib/errgonomic/rails'
 
@@ -39,7 +40,11 @@ engine_loader.eager_load
 ActiveRecord::Base.establish_connection(adapter: 'sqlite3', database: ':memory:')
 ActiveRecord::Base.logger = Logger.new(File::NULL)
 ActiveStorage.logger = Logger.new(File::NULL)
-ActiveStorage::Blob.services = ActiveStorage::Service::Registry.new(test: { service: 'Disk', root: Dir.mktmpdir })
+# The disk service writes what a test attaches, so the run takes its
+# directory away with it rather than leaving one behind under TMPDIR.
+storage_root = Dir.mktmpdir
+Minitest.after_run { FileUtils.remove_entry(storage_root) }
+ActiveStorage::Blob.services = ActiveStorage::Service::Registry.new(test: { service: 'Disk', root: storage_root })
 ActiveStorage::Blob.service = ActiveStorage::Blob.services.fetch(:test)
 
 # Book reviews with various optional attributes and associations
