@@ -2,14 +2,45 @@
 
 require 'active_record'
 require 'action_view'
+require 'openssl'
+require 'active_storage'
+require 'active_storage/reflection'
+require 'active_storage/service/disk_service'
+require 'active_storage/service/registry'
+require 'action_text'
+require 'zeitwerk'
 require 'minitest/autorun'
 require 'logger'
 require 'stringio'
+require 'tmpdir'
 
 require_relative '../lib/errgonomic/rails'
 
+# ActionText and ActiveStorage are engines, so outside a Rails application
+# their models, table prefixes and the macros that declare them are wired up
+# by hand. Their own models declare attachments of their own, and the service
+# check those run reaches for a Rails application unless the model has yet to
+# connect, so they are defined before the connection is established.
+engine_loader = Zeitwerk::Loader.new
+engine_loader.push_dir(File.join(Gem.loaded_specs.fetch('activestorage').full_gem_path, 'app', 'models'))
+engine_loader.push_dir(File.join(Gem.loaded_specs.fetch('actiontext').full_gem_path, 'app', 'models'))
+engine_loader.push_dir(File.join(Gem.loaded_specs.fetch('actiontext').full_gem_path, 'app', 'helpers'))
+engine_loader.setup
+
+def ActiveStorage.table_name_prefix = 'active_storage_'
+def ActionText.table_name_prefix = 'action_text_'
+
+ActiveRecord::Base.include(ActiveStorage::Attached::Model)
+ActiveRecord::Base.include(ActiveStorage::Reflection::ActiveRecordExtensions)
+ActiveRecord::Reflection.singleton_class.prepend(ActiveStorage::Reflection::ReflectionExtension)
+ActiveRecord::Base.include(ActionText::Attribute)
+engine_loader.eager_load
+
 ActiveRecord::Base.establish_connection(adapter: 'sqlite3', database: ':memory:')
 ActiveRecord::Base.logger = Logger.new(File::NULL)
+ActiveStorage.logger = Logger.new(File::NULL)
+ActiveStorage::Blob.services = ActiveStorage::Service::Registry.new(test: { service: 'Disk', root: Dir.mktmpdir })
+ActiveStorage::Blob.service = ActiveStorage::Blob.services.fetch(:test)
 
 # Book reviews with various optional attributes and associations
 ActiveRecord::Schema.define do
@@ -91,6 +122,39 @@ ActiveRecord::Schema.define do
 
   create_table 'tags', id: :string, primary_key: :slug, force: :cascade do |t|
     t.string :label
+  end
+
+  create_table 'members', force: :cascade do |t|
+    t.string :nickname
+    t.string :password_digest
+    t.timestamps
+  end
+
+  # The columns the engines' own migration templates declare, less the
+  # indexes, foreign keys and variant records nothing here reads.
+  create_table 'action_text_rich_texts', force: :cascade do |t|
+    t.string :name, null: false
+    t.text :body
+    t.references :record, null: false, polymorphic: true, index: false
+    t.timestamps
+  end
+
+  create_table 'active_storage_blobs', force: :cascade do |t|
+    t.string :key, null: false
+    t.string :filename, null: false
+    t.string :content_type
+    t.text :metadata
+    t.string :service_name, null: false
+    t.bigint :byte_size, null: false
+    t.string :checksum
+    t.datetime :created_at, null: false
+  end
+
+  create_table 'active_storage_attachments', force: :cascade do |t|
+    t.string :name, null: false
+    t.references :record, null: false, polymorphic: true, index: false
+    t.references :blob, null: false
+    t.datetime :created_at, null: false
   end
 
   create_table 'notes', force: :cascade do |t|
@@ -450,6 +514,27 @@ end
 # Option stores can be compared against what its inner value stores.
 class Note < ActiveRecord::Base
   include Errgonomic::Rails::ActiveRecordOptional
+end
+
+# ActionText and ActiveStorage read the associations their macros declare
+# through code of their own, and has_secure_password reads the digest column
+# raw, so each of these readers has to stay a plain value. The macros are
+# declared where an application writes them, below the include.
+class Member < ActiveRecord::Base
+  include Errgonomic::Rails::ActiveRecordOptional
+  has_one :award, foreign_key: :author_id
+  has_rich_text :body
+  has_one_attached :avatar, service: :test
+  has_secure_password
+end
+
+# A model that has loaded its schema before the macro is declared, so the
+# digest column is already wrapped when has_secure_password arrives.
+class EagerMember < ActiveRecord::Base
+  self.table_name = 'members'
+  include Errgonomic::Rails::ActiveRecordOptional
+  load_schema
+  has_secure_password
 end
 
 # The unconverted twin of Note, for what a form renders from the same row.
@@ -1625,6 +1710,58 @@ class BugTest < Minitest::Test
 
     assert_equal 'imprint', publisher.reload.profile.tagline
     assert_raises(ActiveRecord::RecordInvalid) { Publisher.create!(name: 'Baen') }
+  end
+
+  # ActionText assigns and reads the rich text record through the association
+  # its macro declares, so a wrapper there breaks the attribute outright.
+  def test_a_rich_text_association_stays_unwrapped
+    member = Member.create!(nickname: 'nz', password: 'hunter2')
+    member.body = '<h1>Funny times!</h1>'
+    member.save!
+
+    assert_equal 'Funny times!', Member.find(member.id).body.to_plain_text
+    refute_includes Member.errgonomic_optionals, 'rich_text_body'
+  end
+
+  # ActiveStorage reaches the attachment and the blob through the two
+  # associations its macro declares, and hands what it finds to its own code.
+  def test_an_attachment_association_stays_unwrapped
+    member = Member.create!(nickname: 'nz', password: 'hunter2')
+    member.avatar.attach(io: StringIO.new('portrait'), filename: 'nz.txt', content_type: 'text/plain')
+    attached = Member.find(member.id)
+
+    assert_predicate attached.avatar, :attached?
+    assert_equal 'nz.txt', attached.avatar.filename.to_s
+    assert_equal 'portrait', attached.avatar.download
+    refute_includes Member.errgonomic_optionals, 'avatar_attachment'
+    refute_includes Member.errgonomic_optionals, 'avatar_blob'
+  end
+
+  # has_secure_password reads the digest column raw and hands it to BCrypt,
+  # which has never heard of an Option.
+  def test_a_password_digest_stays_unwrapped
+    member = Member.create!(nickname: 'nz', password: 'hunter2', password_confirmation: 'hunter2')
+
+    assert Member.find(member.id).authenticate('hunter2')
+    refute Member.find(member.id).authenticate('wrong')
+    refute_includes Member.errgonomic_optionals, 'password_digest'
+  end
+
+  # The macro is ordinarily declared before anything touches the schema, but
+  # a model that has already wrapped the column has to hand the reader back
+  # when the declaration arrives.
+  def test_a_digest_wrapped_before_the_macro_is_taken_back
+    member = EagerMember.create!(nickname: 'nz', password: 'hunter2')
+
+    assert EagerMember.find(member.id).authenticate('hunter2')
+    refute_includes EagerMember.errgonomic_optionals, 'password_digest'
+  end
+
+  # Only what the framework reads for itself is left alone: an ordinary
+  # association and an ordinary column on the same model are wrapped as ever.
+  def test_a_framework_exclusion_leaves_the_rest_of_the_model_wrapped
+    assert_includes Member.errgonomic_optionals, 'award'
+    assert_includes Member.errgonomic_optionals, 'nickname'
   end
 
   # An inherited reader is already wrapped, and a second wrap nests: Some of

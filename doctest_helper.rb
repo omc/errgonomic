@@ -43,6 +43,15 @@ class Note < ActiveRecord::Base
   include Errgonomic::Rails::ActiveRecordOptional
 end
 
+# ActionText and ActiveStorage declare singular associations of their own and
+# read them raw. A reflection names its class as a string, so a model can be
+# asked which readers it wrapped without either engine loaded.
+class Dispatch < ActiveRecord::Base
+  self.table_name = 'notes'
+  include Errgonomic::Rails::ActiveRecordOptional
+  has_one :rich_text_body, class_name: 'ActionText::RichText', as: :record
+end
+
 # An unconverted delegation target: its readers hand back plain values, and
 # two of its methods take an argument, a keyword and a block.
 class Writer < ActiveRecord::Base

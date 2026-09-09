@@ -43,7 +43,10 @@ module Errgonomic
     #    it, rather than the wrapper. A singular association with nested
     #    attributes goes further and keeps its plain reader: nested attributes
     #    are assigned through the reader, and ActiveRecord asks whatever it
-    #    finds there whether it is a new record.
+    #    finds there whether it is a new record. So does a reader a framework
+    #    macro declares and then reads for itself: the associations behind
+    #    has_rich_text and has_one_attached, and the digest column
+    #    has_secure_password hands to BCrypt.
     #
     # errgonomic_optional_except and errgonomic_serialize_none are not on the
     # list: they are configuration, an escape hatch for whatever conflict
@@ -51,6 +54,17 @@ module Errgonomic
     # semantic exceptions.
     module ActiveRecordOptional
       extend ActiveSupport::Concern
+
+      # The singular associations ActionText and ActiveStorage declare for a
+      # model and then read through code of their own. Recognized by the name
+      # a reflection was given rather than by the class, so nothing has to be
+      # loaded for a model to be asked.
+      FRAMEWORK_ASSOCIATION_CLASSES = %w[
+        ActionText::RichText
+        ActionText::EncryptedRichText
+        ActiveStorage::Attachment
+        ActiveStorage::Blob
+      ].freeze
 
       included do
         errgonomic_optional_readers
@@ -100,6 +114,15 @@ module Errgonomic
         errgonomic_omit_absent_keys(hash)
       end
 
+      # YARD does not see through a concern's class_methods block, so the
+      # method it documents is declared rather than read.
+      #
+      # @!method errgonomic_optionals
+      #   @!scope class
+      #   The readers a model wrapped, which is how a conversion is checked.
+      #   @example a reader the framework reads for itself is left alone
+      #     Dispatch.errgonomic_optionals.include?('rich_text_body') # => false
+      #     Dispatch.errgonomic_optionals.include?('title') # => true
       class_methods do
         # Wrapped readers live in a module of their own, the way ActiveRecord
         # keeps its attribute methods, so a model's own def of the same name
@@ -150,7 +173,36 @@ module Errgonomic
 
           inherited |
             Array(try(:errgonomic_optional_exceptions)).map(&:to_s) |
-            errgonomic_nested_attribute_associations
+            errgonomic_nested_attribute_associations |
+            errgonomic_framework_readers
+        end
+
+        # Readers the framework reads for itself, whatever the model asked
+        # for. ActionText and ActiveStorage reach their records through the
+        # associations their macros declare, and has_secure_password hands
+        # the digest column to BCrypt, none of them through anything that has
+        # heard of an Option: a wrapper there breaks assignment, attachment
+        # and authentication alike.
+        def errgonomic_framework_readers
+          errgonomic_framework_associations + errgonomic_secure_password_digests
+        end
+
+        def errgonomic_framework_associations
+          reflect_on_all_associations(:has_one)
+            .select { |r| FRAMEWORK_ASSOCIATION_CLASSES.include?(r.class_name) }
+            .map { |r| r.name.to_s }
+        end
+
+        # has_secure_password includes a module of its own per attribute, and
+        # the authenticate_ reader in it names the attribute whose digest is
+        # read. Asking the macro what it declared costs no schema, which a
+        # column scan would load while a class body is still running.
+        def errgonomic_secure_password_digests
+          return [] unless defined?(ActiveModel::SecurePassword::InstanceMethodsOnActivation)
+
+          ancestors.grep(ActiveModel::SecurePassword::InstanceMethodsOnActivation)
+                   .flat_map { |mod| mod.instance_methods(false).grep(/\Aauthenticate_/) }
+                   .map { |name| "#{name.to_s.delete_prefix('authenticate_')}_digest" }
         end
 
         # A wrapped reader whose absent value the declaration in force asks
@@ -222,6 +274,16 @@ module Errgonomic
         # absence is a validation failure rather than a value to handle.
         def has_one(name, scope = nil, **options)
           super.tap { errgonomic_wrap_optional(name) unless options[:required] }
+        end
+
+        # A digest column is ordinarily wrapped after this declaration, and
+        # the exclusion is enough there. A model whose schema has already
+        # loaded has to be handed its reader back. has_rich_text and
+        # has_one_attached need no such override: they declare their
+        # associations through has_one, which reads the exclusion after the
+        # reflection exists.
+        def has_secure_password(attribute = :password, **options)
+          super.tap { errgonomic_unwrap_optionals("#{attribute}_digest") }
         end
 
         # Nested attributes are assigned through the public reader, and

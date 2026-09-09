@@ -13,6 +13,14 @@ Naming/MethodName:
   AllowedPatterns:
     - '\A(Some|None|Ok|Err)\z'
 
+# The optional concern overrides Rails macros so a reader is wrapped or taken
+# back as a model declares one, and an override has to keep the name Rails
+# gave it. These are declarations, not predicates.
+Naming/PredicatePrefix:
+  AllowedMethods:
+    - has_one
+    - has_secure_password
+
 # Option::Any and Result::Any deliberately carry the whole combinator API in
 # one class each, mirroring Rust's Option and Result surface.
 Metrics/ClassLength:
