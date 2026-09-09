@@ -193,7 +193,7 @@ h.fetch_option(:smell)  # => None()
 [:a, nil].fetch_option(2)  # => None()
 ```
 
-`into_optional` wraps the collection in `Errgonomic::OptionalHash` / `Errgonomic::OptionalArray`, a view whose lookups all return Options. The wrappers are deliberately small — `[]`, `[]=`, `dig`, presence checks, and (for arrays) `first`/`last` — and are composed around the plain collection rather than subclassing it, because a subclass sheds its custom semantics every time `select` or `transform_values` returns a plain Hash. `to_h` / `to_a` hand back a detached copy.
+`into_optional` wraps the collection in `Errgonomic::OptionalHash` / `Errgonomic::OptionalArray`, a view whose lookups all return Options. The wrappers are deliberately small: `[]`, `[]=`, `dig`, presence checks, and (for arrays) `first`/`last`. They are composed around the plain collection rather than subclassing it, because a subclass sheds its custom semantics every time `select` or `transform_values` returns a plain Hash. `to_h` / `to_a` hand back a detached copy.
 
 ```ruby
 h = { person: { name: 'Ada', middle_name: nil } }.into_optional
@@ -241,7 +241,7 @@ valid.ok_or("invalid input")  # => Ok(true) / Err("invalid input")
 
 ### Pedantic runtime checks
 
-Combinators that accept a block (`and_then`, `or_else`, ...) check at runtime that the block returned an Option or Result, raising `Errgonomic::ArgumentError` otherwise. That beats an ambiguous `undefined method` error somewhere downstream. If you would rather have the ambiguous downstream errors, you can opt out — but not quietly:
+Combinators that accept a block (`and_then`, `or_else`, ...) check at runtime that the block returned an Option or Result, raising `Errgonomic::ArgumentError` otherwise. That beats an ambiguous `undefined method` error somewhere downstream. If you would rather have the ambiguous downstream errors, you can opt out, but not quietly:
 
 ```ruby
 Errgonomic.with_ambiguous_downstream_errors do
