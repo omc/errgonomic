@@ -33,15 +33,17 @@ module Errgonomic
     #    asks whether it amounts to anything: Some("") passes some: true and
     #    fails presence. It lifts what it is handed, so it asks the same
     #    question of any model, converted or not.
-    # 5. Where ActiveRecord's own machinery reads a value raw, it gets one.
+    # 5. Where the framework's own machinery reads a value raw, it gets one.
     #    Validation unwraps at read_attribute_for_validation, the seam every
-    #    EachValidator fetches an attribute through, and serialization at
+    #    EachValidator fetches an attribute through; serialization at
     #    read_attribute_for_serialization, the seam every attribute in a
-    #    payload is fetched through, so a standard validator weighs the value
-    #    and a payload carries it rather than the wrapper. A singular
-    #    association with nested attributes goes further and keeps its plain
-    #    reader: nested attributes are assigned through the reader, and
-    #    ActiveRecord asks whatever it finds there whether it is a new record.
+    #    payload is fetched through; and a form helper at ActionView's tag
+    #    value, the seam every field reads its record through. So a standard
+    #    validator weighs the value, a payload carries it and a form renders
+    #    it, rather than the wrapper. A singular association with nested
+    #    attributes goes further and keeps its plain reader: nested attributes
+    #    are assigned through the reader, and ActiveRecord asks whatever it
+    #    finds there whether it is a new record.
     #
     # errgonomic_optional_except and errgonomic_serialize_none are not on the
     # list: they are configuration, an escape hatch for whatever conflict
@@ -652,3 +654,28 @@ module Errgonomic
 end
 
 ActiveModel::AttributeRegistration::ClassMethods.prepend(Errgonomic::Rails::ActiveModelAttributeDefault)
+
+module Errgonomic
+  module Rails
+    # A form helper reads its value off the record through the public reader
+    # whenever the value did not come from user input, which is every record
+    # an edit form loads from the database. Each tag then weighs what it finds
+    # its own way: a check box asks it for to_i, a datetime field for
+    # strftime, and a text field renders it into the markup. Unwrapping at the
+    # one seam they all read through is what lets a converted model render the
+    # form an unconverted one renders.
+    module ActionViewTagValue
+      private
+
+      def value
+        Errgonomic::Rails.unwrap_option(super)
+      end
+    end
+  end
+end
+
+# ActionView may be loaded before this file, after it, or not at all, and the
+# load hook answers for all three.
+ActiveSupport.on_load(:action_view) do
+  ActionView::Helpers::Tags::Base.prepend(Errgonomic::Rails::ActionViewTagValue)
+end

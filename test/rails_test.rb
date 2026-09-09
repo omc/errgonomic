@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'active_record'
+require 'action_view'
 require 'minitest/autorun'
 require 'logger'
 require 'stringio'
@@ -449,6 +450,11 @@ end
 # Option stores can be compared against what its inner value stores.
 class Note < ActiveRecord::Base
   include Errgonomic::Rails::ActiveRecordOptional
+end
+
+# The unconverted twin of Note, for what a form renders from the same row.
+class PlainNote < ActiveRecord::Base
+  self.table_name = 'notes'
 end
 
 # A string primary key, where find casting an id it was handed raw fails
@@ -966,6 +972,19 @@ class BugTest < Minitest::Test
     row = Zine.create!(title: 'Wired', issn: '1059-1028')
 
     assert_equal VendorLedger.find(row.id).as_json, PlainZine.find(row.id).as_json
+  end
+
+  # A form helper reads its value off the record through the public reader
+  # whenever the value did not come from user input, which is every record an
+  # edit form loads from the database. Each tag weighs what it finds there its
+  # own way, so a form renders what the unconverted twin renders or not at all.
+  def test_form_helpers_render_what_an_unconverted_record_renders
+    written = Note.create!(title: 'The Redemption of Time', pinned: true, read_at: Time.utc(2026, 7, 31, 12))
+    unwritten = Note.create!
+
+    [written.id, unwritten.id].each do |id|
+      assert_equal render_note_form(PlainNote.find(id)), render_note_form(Note.find(id))
+    end
   end
 
   # to_option lifts a value that may be nil. An Option is already lifted, and
@@ -1957,6 +1976,14 @@ class BugTest < Minitest::Test
     Class.new(ActiveRecord::Base) do
       self.table_name = 'books'
       errgonomic_serialize_none(mode, **scope)
+    end
+  end
+
+  # One tag per way a builder weighs the value it reads: a string rendered
+  # into the field, a boolean asked whether it is checked, a time formatted.
+  def render_note_form(record)
+    ActionView::Base.empty.form_with(model: record, url: '/notes', scope: :note) do |form|
+      form.text_field(:title) + form.check_box(:pinned) + form.datetime_local_field(:read_at)
     end
   end
 

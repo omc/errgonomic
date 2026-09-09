@@ -35,6 +35,7 @@
 - `delegate_optional :model_name, to: :class` and any other target named for a Ruby keyword reach the target through an explicit receiver, where the generated body used to read as the keyword and raise `SyntaxError` as the model loaded
 - `delegate_optional` refuses a writer (`delegate_optional :name=, to: :author`) with an `ArgumentError` where the declaration is written, rather than the `SyntaxError` the generated reader used to raise: an assignment through an absent target has nowhere to put the value
 - `prefix: true` over a module target says that a module has no name to prefix with, where it used to give the message for a target that cannot name a method
+- A form helper on a converted model renders what one on an unconverted model renders: ActionView reads a field's value off the record through the public reader whenever it did not come from user input, which is every record an edit form loads from the database, and that seam now unwraps. `check_box` no longer raises on `to_i`, `datetime_field` no longer raises on `strftime`, and a text field writes the value rather than raising `Errgonomic::SerializeError`
 - [Dev, Test] - Doctests run against an in-memory ActiveRecord connection, so an `@example` under `lib/errgonomic/rails` specifies the integration the same way every other example specifies the core
 
 ## [0.4.1] - 2025-02-20
