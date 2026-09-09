@@ -102,7 +102,12 @@ Some(:left).xor(None())          # => Some(:left)
 Some(1).zip(Some(2))             # => Some([1, 2])
 Some(1).ok_or("nope")            # => Ok(1)
 None().ok_or("nope")             # => Err("nope")
+
+Some(1).each { |x| log(x) }      # yields once; None() yields nothing
+Some(1).each.to_a                # => [1]
 ```
+
+`each` is the whole of the collection surface. An Option does not include `Enumerable`, because `filter` and `first` already answer Options here and Enumerable's answer plain values; `opt.each` hands you an Enumerator when you want the rest of them.
 
 `map` wraps whatever the block returns, as Rust's does, so a block that itself returns an Option gives `Some(Some(x))`. `and_then` is the spelling for that block.
 

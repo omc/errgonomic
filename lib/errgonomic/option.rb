@@ -387,6 +387,28 @@ module Errgonomic
         [value]
       end
 
+      # Yields the inner value once for a Some and not at all for a None, so
+      # an Option reads as the zero-or-one collection it is, and answers an
+      # Enumerator without a block. Option does not include Enumerable: its
+      # own filter and first answer Options, where Enumerable's answer plain
+      # values, and one name cannot mean both.
+      #
+      # @example
+      #   seen = []
+      #   Some(1).each { |x| seen << x } # => Some(1)
+      #   seen # => [1]
+      #   None().each { |x| seen << x } # => None()
+      #   seen # => [1]
+      #   Some(1).each.to_a # => [1]
+      #   None().each.to_a # => []
+      #   Some(2).each.map { |x| x * 3 } # => [6]
+      def each(&block)
+        return to_enum(:each) unless block
+
+        block.call(value) if some?
+        self
+      end
+
       # returns the inner value if present, else raises an error
       # @example
       #   Some(1).unwrap! # => 1
