@@ -144,6 +144,8 @@ Four of Rust's methods are deliberately absent: `take`, `replace`, `insert` and 
 
 Equality is between Options only: `Some(5) == Some(5)`, but `Some(5) == 5` and `None() == nil` are `false`. That is quiet, never an error, matching how every Ruby object compares across types. Rust rejects `Some(5) == 5` at compile time; Ruby cannot, so guard the idiom in review and tests: compare against a wrapped value (`opt == Some(5)`) or test the inner value (`opt.some_and? { |v| v == 5 }`). `Errgonomic.strict_equality = true` turns that guard into an error, which is what a test suite wants; see [Pedantic runtime checks](#pedantic-runtime-checks).
 
+Ordering is between Options too, and unlike equality it says so out loud. `None()` sorts before any `Some` and two `Some`s order by their inner values, so a collection of Options sorts. Ordering one against a bare value raises `Errgonomic::TypeMismatchError` naming both operands and the spellings that work: `Some(read_at) <= Time.current` reaches `Comparable`, which turns Ruby's nil-for-incomparable into an `ArgumentError` blaming the Option, where what went wrong is the unwrapped value on the other side. Test the inner value (`read_at.some_and? { |t| t <= Time.current }`) or reach for it with `map` or `unwrap_or`. Two Options whose inner values do not compare still answer `nil`, as Ruby expects. Results order the same way, with `ok_and?` in place of `some_and?`.
+
 ### Result
 
 `Ok(value)` and `Err(error)` express an operation that may fail, again with the Rust combinators:
