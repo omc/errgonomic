@@ -123,6 +123,9 @@ module Errgonomic
       #   @example a reader the framework reads for itself is left alone
       #     Dispatch.errgonomic_optionals.include?('rich_text_body') # => false
       #     Dispatch.errgonomic_optionals.include?('title') # => true
+      #   @example a subclass reports the readers it inherited
+      #     Briefing.errgonomic_optionals # => ['title', 'summary']
+      #     Briefing.errgonomic_optional_names # => []
       class_methods do
         # Wrapped readers live in a module of their own, the way ActiveRecord
         # keeps its attribute methods, so a model's own def of the same name
@@ -148,10 +151,21 @@ module Errgonomic
 
         # What a model wrapped is the signal that a conversion did what it
         # meant to, and the columns are not wrapped until the schema loads, so
-        # asking loads it.
+        # asking loads it. A subclass responds to every reader an ancestor
+        # wrapped, so the report names those too.
         def errgonomic_optionals
           load_schema
-          errgonomic_optional_names
+          errgonomic_inherited_optional_names | errgonomic_optional_names
+        end
+
+        # Wrapping walks the chain from the top down, so loading this class's
+        # schema has already wrapped an ancestor's columns and reading the
+        # names is enough. An abstract ancestor is never asked for a table it
+        # has not got.
+        def errgonomic_inherited_optional_names
+          return [] unless superclass.respond_to?(:errgonomic_optional_names)
+
+          superclass.errgonomic_inherited_optional_names | superclass.errgonomic_optional_names
         end
 
         # The set as it stands, for the wrapping itself: reaching for the

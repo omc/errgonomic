@@ -1776,6 +1776,16 @@ class BugTest < Minitest::Test
     assert Novel.create!(title: 'Supernova Era').isbn.none?
   end
 
+  # A subclass responds to every reader an ancestor wrapped, so what a model
+  # reports as wrapped names those too. The per-class set is what the wrapping
+  # itself reads, and it stays per class.
+  def test_a_subclass_reports_the_readers_it_inherited
+    assert_includes Novel.errgonomic_optionals, 'isbn'
+    assert_includes Novel.errgonomic_optionals, 'author'
+    assert_equal Book.errgonomic_optionals.sort, Novel.errgonomic_optionals.sort
+    assert_empty Novel.errgonomic_optional_names
+  end
+
   # An include on a base class reaches every model below it, columns and
   # associations alike, which is how an application converts all at once.
   def test_a_base_class_include_reaches_the_models_below_it

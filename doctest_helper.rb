@@ -24,6 +24,12 @@ ActiveRecord::Schema.define do
     t.references :writer
   end
 
+  create_table 'reports', force: :cascade do |t|
+    t.string :type, null: false
+    t.string :title
+    t.text :summary
+  end
+
   create_table 'notes', force: :cascade do |t|
     t.boolean :pinned
     t.string :title
@@ -51,6 +57,14 @@ class Dispatch < ActiveRecord::Base
   include Errgonomic::Rails::ActiveRecordOptional
   has_one :rich_text_body, class_name: 'ActionText::RichText', as: :record
 end
+
+# A subclass wraps nothing of its own: an inherited reader is already an
+# Option, and wrapping it again would nest it.
+class Report < ActiveRecord::Base
+  include Errgonomic::Rails::ActiveRecordOptional
+end
+
+class Briefing < Report; end
 
 # An unconverted delegation target: its readers hand back plain values, and
 # two of its methods take an argument, a keyword and a block.
