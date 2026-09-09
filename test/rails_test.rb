@@ -175,6 +175,63 @@ class Genre < ActiveRecord::Base
   delegate_optional :name, to: :parent, prefix: true, private: true
 end
 
+# A delegation target whose methods take a positional argument, a keyword
+# argument and a block.
+class Chronicler < ActiveRecord::Base
+  self.table_name = 'authors'
+
+  def greeting(salutation, punctuation: '.')
+    "#{salutation}, #{name}#{punctuation}"
+  end
+
+  def transformed_name
+    yield(name)
+  end
+end
+
+# A Symbol prefix names the delegated reader, so the model's own method of
+# the bare name is not the delegation's to take.
+class Almanac < ActiveRecord::Base
+  self.table_name = 'books'
+  belongs_to :author, class_name: 'Chronicler', optional: true
+  include Errgonomic::Rails::ActiveRecordOptional
+
+  def name
+    'the almanac itself'
+  end
+
+  delegate_optional :name, to: :author, prefix: :acct
+end
+
+class Compendium < ActiveRecord::Base
+  self.table_name = 'books'
+  belongs_to :author, class_name: 'Chronicler', optional: true
+  include Errgonomic::Rails::ActiveRecordOptional
+  delegate_optional :greeting, :transformed_name, to: :author, prefix: true
+end
+
+# Targets named for Ruby keywords: the delegation has to reach them through
+# an explicit receiver.
+class Edition < ActiveRecord::Base
+  self.table_name = 'books'
+  include Errgonomic::Rails::ActiveRecordOptional
+  delegate_optional :table_name, to: :class, prefix: true
+
+  def next
+    Edition.where('id > ?', id).order(:id).first
+  end
+
+  delegate_optional :title, to: :next, prefix: true
+end
+
+# delegate_optional is available on every model, so it has to work over an
+# association reader that hands back a plain record or nil.
+class Bulletin < ActiveRecord::Base
+  self.table_name = 'books'
+  belongs_to :author, class_name: 'Chronicler', optional: true
+  delegate_optional :name, to: :author, prefix: true
+end
+
 # A buggy layer that re-enters the attribute reader from beneath it: the
 # generated reader's super lands here, and the unqualified call restarts
 # dispatch at the top of the chain.
@@ -956,6 +1013,48 @@ class BugTest < Minitest::Test
     scifi = Genre.create!(name: 'Sci-Fi', parent: fiction)
     assert_raises(NoMethodError) { scifi.parent_name }
     assert_equal 'Fiction', scifi.send(:parent_name).unwrap!
+  end
+
+  # A Symbol or String prefix names the reader, as it does for Rails'
+  # delegate, and leaves a method of the bare name where it found it.
+  def test_a_symbol_prefix_names_the_delegated_reader
+    author = Chronicler.create!(name: 'Cixin Liu')
+    almanac = Almanac.create!(title: 'Death\'s End', author_id: author.id)
+
+    assert_equal 'Cixin Liu', almanac.acct_name.unwrap!
+    assert_equal 'the almanac itself', almanac.name
+  end
+
+  # A target named for a Ruby keyword reads as the keyword in the body the
+  # delegation is written into.
+  def test_a_target_named_for_a_ruby_keyword_delegates
+    first = Edition.create!(title: 'Omelas')
+    second = Edition.create!(title: 'Semley')
+
+    assert_equal 'books', first.class_table_name.unwrap!
+    assert_equal 'Semley', first.next_title.unwrap!
+    assert second.next_title.none?
+  end
+
+  # A delegation passes on whatever the caller handed it: positional
+  # arguments, keyword arguments and a block.
+  def test_a_delegated_call_forwards_arguments_and_a_block
+    author = Chronicler.create!(name: 'Cixin Liu')
+    compendium = Compendium.create!(title: 'Death\'s End', author_id: author.id)
+
+    assert_equal 'Hello, Cixin Liu.', compendium.author_greeting('Hello').unwrap!
+    assert_equal 'Hi, Cixin Liu!', compendium.author_greeting('Hi', punctuation: '!').unwrap!
+    assert_equal 'CIXIN LIU', compendium.author_transformed_name(&:upcase).unwrap!
+  end
+
+  # The target reader is lifted rather than assumed to be an Option, so a
+  # model delegates whether or not it has converted.
+  def test_a_delegation_lifts_whatever_the_target_reader_returns
+    author = Chronicler.create!(name: 'Cixin Liu')
+
+    assert_equal 'Cixin Liu', Bulletin.create!(title: 'Death\'s End', author_id: author.id).author_name.unwrap!
+    assert Bulletin.create!(title: 'Supernova Era').author_name.none?
+    assert Book.create!(title: 'Supernova Era').author_name.none?
   end
 
   # An encrypted attribute is a nullable column like any other, and the

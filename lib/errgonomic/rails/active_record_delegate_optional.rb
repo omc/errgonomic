@@ -4,10 +4,81 @@ module Errgonomic
   module Rails
     # Adds a `delegate_optional` class method in the spirit of Rails'
     # `delegate`, returning an Option instead of nil or NoMethodError when
-    # the delegation target is absent.
+    # the delegation target is absent. The generated reader forwards with
+    # `...` from inside a block, which Ruby 3.4, the version CI runs, accepts.
     module ActiveRecordDelegateOptional
       extend ActiveSupport::Concern
 
+      # What a declaration that cannot mean what it says is told, where it is
+      # written. A writer is refused rather than delegated: an assignment
+      # through an absent target has nowhere to put the value, and dropping it
+      # silently is the failure an Option exists to prevent.
+      NO_TARGET = "Delegation needs a target. Supply a keyword argument 'to' " \
+                  '(e.g. delegate_optional :hello, to: :greeter).'
+      NO_WRITERS = 'delegate_optional does not delegate a writer; an absent target would drop the value assigned'
+      NO_NAME_TO_PREFIX = "prefix: true takes the target's own name, and a module target has none; name the prefix"
+      NO_METHOD_TO_PREFIX = 'Can only automatically set the delegation prefix when delegating to a method.'
+      ALWAYS_NONE = 'delegate_optional reads an absent target as None; allow_nil: false asks for something else'
+      private_constant :NO_TARGET, :NO_WRITERS, :NO_NAME_TO_PREFIX, :NO_METHOD_TO_PREFIX, :ALWAYS_NONE
+
+      # YARD does not see through a concern's class_methods block, so the
+      # method it documents is declared rather than read.
+      #
+      # @!method delegate_optional(*methods, to: nil, prefix: nil, private: nil, allow_nil: nil)
+      #   @!scope class
+      #   Delegates to an optional target, answering an Option: None where the target is absent.
+      #   @example prefix forms name the reader, as they do for Rails' delegate
+      #     article = Article.create!(title: 'Omelas', writer: Writer.create!(name: 'Ursula', bio: 'writes'))
+      #     article.writer_name # => Some('Ursula')
+      #     article.author_name # => Some('Ursula')
+      #     article.bio # => Some('writes')
+      #   @example a delegated call forwards what it was handed
+      #     article = Article.create!(title: 'Omelas', writer: Writer.create!(name: 'Ursula'))
+      #     article.writer_greeting('Hello') # => Some('Hello, Ursula.')
+      #     article.writer_greeting('Hi', punctuation: '!') # => Some('Hi, Ursula!')
+      #     article.writer_styled_name(&:upcase) # => Some('URSULA')
+      #   @example a target named for a Ruby keyword is reached through self
+      #     Article.create!(title: 'Omelas').table_name # => Some('articles')
+      #   @example the target is lifted, and an Option it hands back is not nested
+      #     draft = Draft.create!(title: 'Omelas', writer_id: Writer.create!(name: 'Ursula').id)
+      #     draft.writer_name # => Some('Ursula')
+      #     draft.byline_name # => Some('Ursula')
+      #     Draft.create!(title: 'Untitled').writer_name # => None()
+      #     Article.create!(title: 'Untitled').writer_name # => None()
+      #   @example a delegated reader points at the model that declared it
+      #     Article.instance_method(:writer_name).source_location.first.end_with?('doctest_helper.rb') # => true
+      #   @example an absent target is a value here, so allow_nil: true says nothing new
+      #     Reprint.create!(title: 'Untitled').writer_name # => None()
+      #     Reprint.create!(title: 'Untitled').respond_to?(:bio) # => false
+      #     begin
+      #       Class.new(Reprint) { delegate_optional :name, to: :writer, allow_nil: false }
+      #     rescue ArgumentError => e
+      #       e.message
+      #     end # => 'delegate_optional reads an absent target as None; allow_nil: false asks for something else'
+      #   @example a delegation needs a target
+      #     begin
+      #       Class.new(Reprint) { delegate_optional :name }
+      #     rescue ArgumentError => e
+      #       e.message
+      #     end.start_with?("Delegation needs a target. Supply a keyword argument 'to'") # => true
+      #   @example a writer is not delegated
+      #     begin
+      #       Class.new(Reprint) { delegate_optional :name=, to: :writer }
+      #     rescue ArgumentError => e
+      #       e.message
+      #     end # => 'delegate_optional does not delegate a writer; an absent target would drop the value assigned'
+      #   @example a module target has no name to prefix with
+      #     begin
+      #       Class.new(Reprint) { delegate_optional :name, to: Errgonomic, prefix: true }
+      #     rescue ArgumentError => e
+      #       e.message
+      #     end # => "prefix: true takes the target's own name, and a module target has none; name the prefix"
+      #   @example an automatic prefix needs a target it can name a method after
+      #     begin
+      #       Class.new(Article) { delegate_optional :name, to: :@writer, prefix: true }
+      #     rescue ArgumentError => e
+      #       e.message
+      #     end # => 'Can only automatically set the delegation prefix when delegating to a method.'
       class_methods do
         # Names attributes that ActiveRecordOptional must leave alone. It has to
         # be callable before the include, which is what starts the wrapping for
@@ -66,18 +137,66 @@ module Errgonomic
             'declare :omit on the readers to leave out'
         end
 
-        def delegate_optional(*methods, to: nil, prefix: nil, private: nil)
-          return if to.nil?
+        def delegate_optional(*methods, to: nil, prefix: nil, private: nil, allow_nil: nil)
+          declared_at = caller_locations(1, 1).first
+          complaint = delegate_optional_complaint(methods, to, prefix, allow_nil)
+          raise ::ArgumentError, complaint if complaint
 
+          receiver = delegate_optional_receiver(to)
           methods.each do |method_name|
-            prefixed_method_name = prefix == true ? "#{to}_#{method_name}" : method_name
-            class_eval <<-RUBY, __FILE__, __LINE__ + 1
-              def #{prefixed_method_name}
-                #{to}.map { |obj| obj.send(:#{method_name}) }
-              end
-            RUBY
-            send(:private, prefixed_method_name) if private
+            reader = "#{delegate_optional_prefix(to, prefix)}#{method_name}"
+            define_optional_delegation(receiver, method_name, reader, declared_at)
+            private(reader) if private
           end
+        end
+
+        # Both ends lift exactly one layer, so a record, a nil and an Option
+        # all delegate, and an Option the call returns is not wrapped twice.
+        # The call is written out rather than sent, so the target's method is
+        # reached on the same terms a caller would reach it on, and the reader
+        # takes the declaration's file and line so a backtrace names the model.
+        def define_optional_delegation(receiver, method_name, reader, declared_at)
+          class_eval <<-RUBY, declared_at.path, declared_at.lineno # rubocop:disable Style/EvalWithLocation
+            def #{reader}(...)
+              #{receiver}.to_option.and_then { |target| target.#{method_name}(...).to_option }
+            end
+          RUBY
+        end
+
+        # A target named for a Ruby keyword reads as the keyword in the body
+        # it is written into, so it needs an explicit receiver. Rails answers
+        # the same question for delegate, and answers it for the same names.
+        def delegate_optional_receiver(to)
+          return to.to_s unless ::ActiveSupport::Delegation::RESERVED_METHOD_NAMES.include?(to.to_s)
+
+          "self.#{to}"
+        end
+
+        # true asks for the target's own name; any other prefix is the name.
+        def delegate_optional_prefix(to, prefix)
+          return '' unless prefix
+
+          "#{prefix == true ? to : prefix}_"
+        end
+
+        # A mistake is worth more where the declaration is written than as a
+        # method nothing can call. allow_nil: true is what a delegation does
+        # here anyway, so a swap from delegate carries; its opposite does not.
+        def delegate_optional_complaint(methods, to, prefix, allow_nil)
+          return NO_TARGET if to.nil?
+          return NO_WRITERS if methods.any? { |method_name| /\A\w+=\z/.match?(method_name.to_s) }
+          return ALWAYS_NONE if allow_nil == false
+
+          delegate_optional_prefix_complaint(to, prefix)
+        end
+
+        # An automatic prefix is the target's own name, so the target needs
+        # one, and one that can start a method name.
+        def delegate_optional_prefix_complaint(to, prefix)
+          return unless prefix == true
+          return NO_NAME_TO_PREFIX if to.is_a?(::Module)
+
+          NO_METHOD_TO_PREFIX if /^[^a-z_]/.match?(to.to_s)
         end
       end
     end

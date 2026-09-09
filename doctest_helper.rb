@@ -14,6 +14,16 @@ ActiveRecord::Base.logger = Logger.new(File::NULL)
 # One nullable column per type the cast boundary has to map.
 ActiveRecord::Schema.verbose = false
 ActiveRecord::Schema.define do
+  create_table 'writers', force: :cascade do |t|
+    t.string :name
+    t.text :bio
+  end
+
+  create_table 'articles', force: :cascade do |t|
+    t.string :title
+    t.references :writer
+  end
+
   create_table 'notes', force: :cascade do |t|
     t.boolean :pinned
     t.string :title
@@ -31,6 +41,54 @@ Errgonomic::Rails.setup_before
 
 class Note < ActiveRecord::Base
   include Errgonomic::Rails::ActiveRecordOptional
+end
+
+# An unconverted delegation target: its readers hand back plain values, and
+# two of its methods take an argument, a keyword and a block.
+class Writer < ActiveRecord::Base
+  def greeting(salutation, punctuation: '.')
+    "#{salutation}, #{name}#{punctuation}"
+  end
+
+  def styled_name
+    yield(name)
+  end
+end
+
+# A converted model reads its association as an Option.
+class Article < ActiveRecord::Base
+  include Errgonomic::Rails::ActiveRecordOptional
+  belongs_to :writer, optional: true
+  delegate_optional :name, to: :writer, prefix: true
+  delegate_optional :name, to: :writer, prefix: :author
+  delegate_optional :bio, to: :writer
+  delegate_optional :greeting, :styled_name, to: :writer, prefix: true
+  delegate_optional :table_name, to: :class
+end
+
+# The same records read through a converted model, so the target's own
+# reader is already an Option.
+class Byline < ActiveRecord::Base
+  self.table_name = 'writers'
+  include Errgonomic::Rails::ActiveRecordOptional
+end
+
+# Unconverted, so the association reader hands back a plain record or nil.
+class Draft < ActiveRecord::Base
+  self.table_name = 'articles'
+  belongs_to :writer, optional: true
+  belongs_to :byline, class_name: 'Byline', foreign_key: :writer_id, optional: true
+  delegate_optional :name, to: :writer, prefix: true
+  delegate_optional :name, to: :byline, prefix: true
+end
+
+# A mechanical swap from Rails' delegate carries allow_nil: true along, and
+# a delegation declared private stays off the public surface.
+class Reprint < ActiveRecord::Base
+  self.table_name = 'articles'
+  belongs_to :writer, optional: true
+  delegate_optional :name, to: :writer, prefix: true, allow_nil: true
+  delegate_optional :bio, to: :writer, private: true
 end
 
 # Two validators that answer differently for the same wrapped value.
