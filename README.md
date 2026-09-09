@@ -117,6 +117,8 @@ An unhandled Option refuses to leak into your output: `to_json` and `as_json` ra
 
 `to_s` renders rather than refusing: `Some(1).to_s` is `"Some(1)"` and `None().to_s` is `"None"`, matching `inspect`, and the same holds for `Ok` and `Err`. Rust gives `Option` a `Debug` and no `Display`, so raising was the faithful reading, but a `to_s` that raises replaces the real exception while a `rescue` builds its log line, which is the worst possible place to be strict. The rendered form is unambiguous: a `Some(1)` in a log says a wrapper arrived where a value was meant.
 
+`expect!` also takes a block, on an Option and a Result alike, so a message that interpolates is built only on the branch that raises: `tier.expect! { "no tier for #{account.id}" }`. `present_or_raise!` takes one on the same terms. The positional form is unchanged.
+
 `unwrap!` and `expect!` are for tests and consoles, not application code: they raise on `None`, which is exactly the ambiguous failure the type exists to prevent. Application code should always have a combinator or pattern match that handles the `None` branch explicitly; if none fits, that is a gap worth an issue rather than a reason to unwrap.
 
 Presence follows the discriminant, as in Rust: `Some` is `present?` and `None` is `blank?`, regardless of the wrapped value. So `Some(false).present?` and `Some(nil).present?` are both `true`. If you care about the inner value's own presence, unwrap it first.

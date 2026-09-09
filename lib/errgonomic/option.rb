@@ -216,7 +216,8 @@ module Errgonomic
       # semantics.
 
       # Returns the inner value of a Some, and raises on a None. Presence
-      # follows the discriminant, so Some(nil) yields nil.
+      # follows the discriminant, so Some(nil) yields nil. A block is called
+      # only on the None branch, as it is for expect!.
       #
       # @param message [String] The error message to raise on a None.
       # @return [Object] The inner value of a Some.
@@ -225,9 +226,10 @@ module Errgonomic
       #   Some("secret").present_or_raise!("no secret") # => "secret"
       #   Some(nil).present_or_raise!("no secret") # => nil
       #   None().present_or_raise!("no secret") # => raise Errgonomic::NotPresentError, "no secret"
-      def present_or_raise!(message)
+      #   None().present_or_raise! { "no secret for #{7}" } # => raise Errgonomic::NotPresentError, "no secret for 7"
+      def present_or_raise!(message = nil, &block)
         presence_nudge('present_or_raise', 'expect!')
-        raise Errgonomic::NotPresentError, message if none?
+        raise Errgonomic::NotPresentError, block ? block.call : message if none?
 
         value
       end
@@ -356,13 +358,17 @@ module Errgonomic
         value
       end
 
-      # returns the inner value if pressent, else raises an error with the given
-      # message
+      # Returns the inner value of a Some, else raises with the given message.
+      # A block is called only on the None branch, so a message that
+      # interpolates costs nothing on the path that succeeds.
+      #
       # @example
       #   Some(1).expect!("msg") # => 1
       #   None().expect!("here's why this failed") # => raise Errgonomic::ExpectError, "here's why this failed"
-      def expect!(msg)
-        raise Errgonomic::ExpectError, msg if none?
+      #   Some(1).expect! { "built only where it is raised" } # => 1
+      #   None().expect! { "no tier for #{7}" } # => raise Errgonomic::ExpectError, "no tier for 7"
+      def expect!(msg = nil, &block)
+        raise Errgonomic::ExpectError, block ? block.call : msg if none?
 
         value
       end

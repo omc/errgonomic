@@ -169,15 +169,17 @@ module Errgonomic
       end
 
       # Return the inner value of an Ok, else raise an exception with the given
-      # message when Err.
+      # message when Err. A block is called only on the Err branch, so a
+      # message that interpolates costs nothing on the path that succeeds.
       #
       # @param msg [String]
       #
       # @example
       #   Ok(1).expect!("should have worked") # => 1
       #   Err(:d).expect!("should have worked") # => raise Errgonomic::ExpectError, "should have worked"
-      def expect!(msg)
-        raise Errgonomic::ExpectError, msg unless ok?
+      #   Err(:d).expect! { "no rate for #{7}" } # => raise Errgonomic::ExpectError, "no rate for 7"
+      def expect!(msg = nil, &block)
+        raise Errgonomic::ExpectError, block ? block.call : msg unless ok?
 
         @value
       end

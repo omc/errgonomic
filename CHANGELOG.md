@@ -1,5 +1,6 @@
 ## [Unreleased]
 
+- `expect!` on an Option or a Result, and `present_or_raise!` on an Option, take a block that is called only on the branch that raises, so a message built from the value it is missing costs nothing on the path that succeeds. The positional message is unchanged
 - [Behavior change] `to_s` on an Option or a Result renders as `inspect` does (`Some(1).to_s # => "Some(1)"`, `Err(:x).to_s # => "Err(:x)"`) where 0.8.x raised `Errgonomic::SerializeError`. A `to_s` that raises replaces the real exception while a `rescue` builds its log line. `to_json` and `as_json` still raise
 - `Option#presence` is supported rather than soft-deprecated: it is the Rails spelling of `unwrap_or(nil)` and no longer nudges. It stays discriminant-based, so `Some("").presence` is `""` where `"".presence` is `nil`
 - The nudge from the soft-deprecated `present_or`, `present_or_else` and `present_or_raise!` fires once per process per method rather than once per call, so a hot path no longer floods stderr
