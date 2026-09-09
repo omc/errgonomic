@@ -24,11 +24,11 @@ module Errgonomic
     # 2. Some delegates persisted? and touch_later to its record, so a Some
     #    can stand in for it where ActiveRecord reads an association back
     #    through its public reader.
-    # 3. Boundaries into ActiveRecord unwrap Options: quoting and predicate
-    #    building at the SQL boundary, attribute and singular association
-    #    writers on assignment, and the type cast and serialization for a
-    #    value that reaches the database without passing a writer, as
-    #    update_all, insert_all, upsert, an attribute default and find_by do.
+    # 3. Boundaries into ActiveRecord unwrap Options where a value enters,
+    #    above the column type in every case: quoting and predicate building
+    #    at the SQL boundary, attribute and singular association writers on
+    #    assignment, the ids and conditions find, find_by and a bulk write
+    #    are given, and an attribute default where it is declared.
     # 4. SomeValidator asks whether a value is there at all, where presence
     #    asks whether it amounts to anything: Some("") passes some: true and
     #    fails presence. It lifts what it is handed, so it asks the same
@@ -333,23 +333,6 @@ module Errgonomic
   end
 end
 
-# Teach ActiveRecord type casting to unwrap Options: a Some casts as its
-# inner value, a None casts as nil.
-module ActiveRecordOptionShim
-  def type_cast(value)
-    case value
-    when Errgonomic::Option::Some
-      super(value.unwrap!)
-    when Errgonomic::Option::None
-      super(nil)
-    else
-      super
-    end
-  end
-end
-
-ActiveRecord::ConnectionAdapters::Quoting.prepend(ActiveRecordOptionShim)
-
 # Lift nil into None.
 class NilClass
   def to_option
@@ -440,6 +423,49 @@ module Errgonomic
     def self.unwrap_option(value)
       value.is_a?(Errgonomic::Option::Any) ? value.unwrap_or(nil) : value
     end
+
+    # Unwrap each value of a hash one layer, where the boundary takes a row
+    # or a set of conditions rather than a single value. A nested structure
+    # is the caller's own, and is left as it is. A hash holding no Option is
+    # handed back rather than copied: every write passes here, and most carry
+    # none.
+    #
+    # @example
+    #   Errgonomic::Rails.unwrap_option_values(title: Some('x'), body: None()) # => { title: 'x', body: nil }
+    #   plain = { title: 'x' }
+    #   Errgonomic::Rails.unwrap_option_values(plain).equal?(plain) # => true
+    def self.unwrap_option_values(hash)
+      return hash unless hash.each_value.any?(Errgonomic::Option::Any)
+
+      hash.transform_values { |value| unwrap_option(value) }
+    end
+
+    # Unwrap each value of each row, where the boundary takes a list of rows.
+    # A list holding no Option is handed back rather than copied.
+    #
+    # @example
+    #   Errgonomic::Rails.unwrap_option_rows([{ title: Some('x') }]) # => [{ title: 'x' }]
+    #   plain = [{ title: 'x' }]
+    #   Errgonomic::Rails.unwrap_option_rows(plain).equal?(plain) # => true
+    def self.unwrap_option_rows(rows)
+      return rows unless rows.any? { |row| row.is_a?(Hash) && row.each_value.any?(Errgonomic::Option::Any) }
+
+      rows.map { |row| row.is_a?(Hash) ? unwrap_option_values(row) : row }
+    end
+
+    # A declared default that is a Proc is not a value yet: ActiveModel calls
+    # it with no arguments each time a record is built. Wrap it rather than
+    # unwrap it, so what it returns meets the type where a literal default
+    # already does.
+    #
+    # @example
+    #   Errgonomic::Rails.unwrap_option_default(Some(1)) # => 1
+    #   Errgonomic::Rails.unwrap_option_default(-> { Some(1) }).call # => 1
+    def self.unwrap_option_default(default)
+      return unwrap_option(default) unless default.is_a?(Proc)
+
+      -> { unwrap_option(default.call) }
+    end
   end
 end
 
@@ -492,52 +518,102 @@ ActiveModel::AttributeSet.prepend(Errgonomic::Rails::ActiveModelAttributeWrite)
 
 module Errgonomic
   module Rails
-    # Values that never pass an attribute writer are cast on their way to a
-    # bind parameter instead: update_all, insert_all and upsert each cast a
-    # hash of values against the column type, as does an attribute default.
-    # The cast is the one place they all share, so a Some casts as its inner
-    # value and a None as nil.
-    #
-    module ActiveModelTypeCast
-      # @example
-      #   ActiveModel::Type::Boolean.new.cast(Some(false)) # => false
-      #   ActiveModel::Type::String.new.cast(Some('The Dark Forest')) # => 'The Dark Forest'
-      #   ActiveModel::Type::Integer.new.cast(None()) # => nil
-      #   ActiveModel::Type::Integer.new.cast(Some(3)) # => 3
-      def cast(value)
-        super(Errgonomic::Rails.unwrap_option(value))
-      end
-
-      # find_by binds its values straight into a cached statement rather than
-      # through the predicate builder, so the column type serializes what the
-      # caller passed. Most types reach here through their own serialize, and
-      # an encrypted one hands its value to the underlying type's before
-      # calling to_s on the result.
+    # find and find_by choose their path before any bind exists: an id or a
+    # condition the statement cache cannot express is sent to the relation
+    # instead. A None has to arrive as nil for that choice, so an absent
+    # value asks for IS NULL rather than an equality that can never match.
+    module ActiveRecordFind
+      # A raw SQL condition is left alone, so an Option interpolated into one
+      # still raises rather than binding quietly.
       #
       # @example
-      #   ActiveModel::Type::String.new.serialize(Some('The Dark Forest')) # => 'The Dark Forest'
-      #   ActiveModel::Type::String.new.serialize(None()) # => nil
-      def serialize(value)
-        super(Errgonomic::Rails.unwrap_option(value))
+      #   note = Note.create!(body: 'Ball Lightning')
+      #   Note.find_by(id: note.id, title: None()) == note # => true
+      #   Note.find(Some(note.id)) == note # => true
+      def find_by(*args)
+        super(*args.map { |arg| arg.is_a?(Hash) ? Errgonomic::Rails.unwrap_option_values(arg) : arg })
+      end
+
+      # A list of ids is a list of values, so it unwraps one level in: find
+      # casts each id it was handed after the query has run, and a wrapper
+      # reaching a string primary key's type raises there.
+      #
+      # @example
+      #   first = Note.create!(title: 'Supernova Era')
+      #   second = Note.create!(title: 'Ball Lightning')
+      #   Note.find([Some(second.id), Some(first.id)]) == [second, first] # => true
+      def find(*ids, &block)
+        super(*ids.map { |id| Errgonomic::Rails.unwrap_options(id) }, &block)
       end
     end
 
-    # Two of ActiveModel's type helpers read the value before Type::Value
-    # ever sees it: Numeric asks it for presence, which on an Option is the
-    # soft-deprecated unwrap, and Mutable serializes it, which an Option
-    # refuses. They need a module of their own, because a module already
-    # somewhere in a type's ancestors is not inserted into it a second time.
-    module ActiveModelTypeHelperCast
+    # A relation and an association reach find without passing the class
+    # method, so the same list has to be unwrapped there as well.
+    module ActiveRecordRelationFind
       # @example
-      #   ActiveModel::Type::Integer.new.cast(Some(0)) # => 0
-      #   ActiveRecord::Type::Json.new.cast(Some({ 'a' => 1 })) # => { 'a' => 1 }
-      def cast(value)
-        super(Errgonomic::Rails.unwrap_option(value))
+      #   note = Note.create!(title: 'Death\'s End')
+      #   Note.where.not(title: nil).find([Some(note.id)]) == [note] # => true
+      def find(*ids, &block)
+        super(*ids.map { |id| Errgonomic::Rails.unwrap_options(id) }, &block)
       end
     end
   end
 end
 
-ActiveModel::Type::Value.prepend(Errgonomic::Rails::ActiveModelTypeCast)
-ActiveModel::Type::Helpers::Numeric.prepend(Errgonomic::Rails::ActiveModelTypeHelperCast)
-ActiveModel::Type::Helpers::Mutable.prepend(Errgonomic::Rails::ActiveModelTypeHelperCast)
+ActiveRecord::Core::ClassMethods.prepend(Errgonomic::Rails::ActiveRecordFind)
+ActiveRecord::Relation.prepend(Errgonomic::Rails::ActiveRecordRelationFind)
+
+module Errgonomic
+  module Rails
+    # A bulk write never passes an attribute writer: it casts and serializes
+    # each value it was handed straight into the statement. Unwrapping the
+    # row on the way in is what lets a Some cross that boundary whatever the
+    # column type is. insert, insert! and upsert route through their plural
+    # forms, so they are covered here too. A nested structure inside a value
+    # is the caller's own and is left as it is.
+    module ActiveRecordBulkWrite
+      # @example
+      #   Note.insert_all([{ title: Some('Wanderer'), rank: None() }])
+      #   Note.where(title: 'Wanderer').update_all(rank: Some(3))
+      #   Note.find_by(title: 'Wanderer').rank # => Some(3)
+      def update_all(updates)
+        super(updates.is_a?(Hash) ? Errgonomic::Rails.unwrap_option_values(updates) : updates)
+      end
+
+      def insert_all(attributes, **kwargs)
+        super(Errgonomic::Rails.unwrap_option_rows(attributes), **kwargs)
+      end
+
+      def insert_all!(attributes, **kwargs)
+        super(Errgonomic::Rails.unwrap_option_rows(attributes), **kwargs)
+      end
+
+      def upsert_all(attributes, **kwargs)
+        super(Errgonomic::Rails.unwrap_option_rows(attributes), **kwargs)
+      end
+    end
+  end
+end
+
+ActiveRecord::Relation.prepend(Errgonomic::Rails::ActiveRecordBulkWrite)
+
+module Errgonomic
+  module Rails
+    # A declared default reaches the record's attribute without passing a
+    # writer: it is held as given and cast the first time the attribute is
+    # read. Unwrapping where it is declared is the only point above the type,
+    # and it keeps the stored default a plain value, as an assigned one is.
+    module ActiveModelAttributeDefault
+      # @example
+      #   DefaultedNote.new.rank # => 0
+      #   DefaultedNote.new.title # => nil
+      #   ProcDefaultedNote.new.title # => 'Wanderer'
+      def attribute(name, type = nil, **options)
+        options[:default] = Errgonomic::Rails.unwrap_option_default(options[:default]) if options.key?(:default)
+        super(name, type, **options)
+      end
+    end
+  end
+end
+
+ActiveModel::AttributeRegistration::ClassMethods.prepend(Errgonomic::Rails::ActiveModelAttributeDefault)

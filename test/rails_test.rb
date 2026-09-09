@@ -82,6 +82,16 @@ ActiveRecord::Schema.define do
     t.timestamps
   end
 
+  create_table 'ledgers', force: :cascade do |t|
+    t.string :memo
+    t.integer :price
+    t.timestamps
+  end
+
+  create_table 'tags', id: :string, primary_key: :slug, force: :cascade do |t|
+    t.string :label
+  end
+
   create_table 'notes', force: :cascade do |t|
     t.boolean :pinned
     t.string :title
@@ -384,6 +394,13 @@ class Note < ActiveRecord::Base
   include Errgonomic::Rails::ActiveRecordOptional
 end
 
+# A string primary key, where find casting an id it was handed raw fails
+# outright rather than coercing the wrapper down a soft-deprecated path.
+class Tag < ActiveRecord::Base
+  self.primary_key = 'slug'
+  include Errgonomic::Rails::ActiveRecordOptional
+end
+
 # A declared default is cast on its way into a new record rather than
 # assigned through a writer.
 class DefaultedNote < ActiveRecord::Base
@@ -392,6 +409,57 @@ class DefaultedNote < ActiveRecord::Base
   attribute :rank, :integer, default: Some(0)
   attribute :meta, :json, default: Some({ 'shelf' => 'new' })
   attribute :title, :string, default: None()
+end
+
+# An application's own type, casting and serializing a value object of its
+# own. It overrides both without calling super, which is what a type written
+# against ActiveModel::Type::Value's documented contract does, so no seam
+# prepended onto Value stands between it and the value it is handed.
+Money = Struct.new(:cents)
+
+class MoneyType < ActiveModel::Type::Value
+  def cast(value)
+    case value
+    when nil then nil
+    when Money then value
+    when Integer then Money.new(value)
+    else raise ArgumentError, "MoneyType cannot cast #{value.class}"
+    end
+  end
+
+  def serialize(value)
+    case value
+    when nil then nil
+    when Money then value.cents
+    when Integer then value
+    else raise ArgumentError, "MoneyType cannot serialize #{value.class}"
+    end
+  end
+end
+
+class Ledger < ActiveRecord::Base
+  attribute :price, MoneyType.new
+  include Errgonomic::Rails::ActiveRecordOptional
+end
+
+# A default on a custom type is cast on its way into a new record, by the
+# custom type rather than by the one the column would have had.
+class DefaultedLedger < ActiveRecord::Base
+  self.table_name = 'ledgers'
+  attribute :price, MoneyType.new, default: Some(Money.new(500))
+end
+
+class UnpricedLedger < ActiveRecord::Base
+  self.table_name = 'ledgers'
+  attribute :price, MoneyType.new, default: None()
+end
+
+# A Proc default is called when the record is built, so what it returns meets
+# the column type exactly where a literal default does.
+class ProcDefaultedNote < ActiveRecord::Base
+  self.table_name = 'notes'
+  attribute :title, :string, default: -> { Some('Wanderer') }
+  attribute :body, :text, default: -> { None() }
 end
 
 # A converted model carrying one validator family per wrapped column, so
@@ -582,6 +650,65 @@ class BugTest < Minitest::Test
 
     assert_equal note.id, Note.find_by(title: Some('Ball Lightning')).id
     assert_equal note.id, Note.find_by(rank: Some(987)).id
+  end
+
+  # A json column encodes the value it is given rather than handing it on, so
+  # find_by has to meet the Option before the column type does, as where
+  # already does.
+  def test_find_by_takes_an_option_on_a_json_column
+    note = Note.create!(meta: { 'isbn' => '9780765377104' })
+
+    assert_equal note.id, Note.find_by(meta: Some({ 'isbn' => '9780765377104' })).id
+  end
+
+  # A None means absent, and find_by asks the statement cache for an equality
+  # bind, which can never match a NULL. Unwrapping before find_by decides
+  # sends it down the relation path instead, where the predicate builder
+  # renders IS NULL, so find_by(col: None()) says what find_by(col: nil) says.
+  def test_find_by_with_a_none_asks_for_null
+    untitled = Note.create!(body: 'Ball Lightning')
+
+    assert_equal untitled.id, Note.find_by(id: untitled.id, title: None()).id
+    assert_equal untitled.id, Note.find_by(id: untitled.id, meta: None()).id
+    assert_equal untitled.id, Note.find_by(id: untitled.id, title: nil).id
+    assert_nil Note.find_by(id: untitled.id, title: Some('The Dark Forest'))
+  end
+
+  # find and exists? bind through the same query attribute find_by does, so a
+  # Some has to arrive there as its inner value as well.
+  def test_find_and_exists_take_an_option_on_a_primary_key
+    genre = Genre.create!(name: 'Sci-Fi')
+    book = Book.create!(title: 'The Dark Forest', genre_id: genre.id)
+
+    assert_equal genre.id, Genre.find(book.genre_id).id
+    assert Genre.exists?(id: Some(genre.id))
+  end
+
+  # find given a list of ids casts each one after the query has run, so an
+  # Option in the list has to be unwrapped before it goes in. A relation and
+  # an association reach that path without passing the class method.
+  def test_find_with_a_list_of_options
+    Tag.create!(slug: 'aa', label: 'first')
+    Tag.create!(slug: 'bb', label: 'second')
+    author = Author.create!(name: 'Cixin Liu')
+    ants = Book.create!(title: 'Of Ants and Dinosaurs', author_id: author.id)
+    village = Book.create!(title: 'The Village Teacher', author_id: author.id)
+
+    nudges = capture_stderr do
+      assert_equal %w[bb aa], Tag.find([Some('bb'), Some('aa')]).map(&:slug)
+      assert_equal %w[bb aa], Tag.where.not(label: nil).find([Some('bb'), Some('aa')]).map(&:slug)
+      assert_equal [village.id, ants.id], author.books.find([Some(village.id), Some(ants.id)]).map(&:id)
+    end
+
+    assert_empty nudges
+  end
+
+  # An absent id is no id, so find says what it says for nil rather than
+  # naming the wrapper it could not match.
+  def test_find_with_a_none_reports_a_missing_id
+    error = assert_raises(ActiveRecord::RecordNotFound) { Genre.find(None()) }
+
+    assert_equal 'Couldn\'t find Genre without an ID', error.message
   end
 
   def test_where_with_a_none_asks_for_null
@@ -1272,6 +1399,13 @@ class BugTest < Minitest::Test
   end
 
   # A default is cast on its way into a new record, without passing a writer.
+  def test_a_proc_attribute_default_may_return_an_option
+    note = ProcDefaultedNote.new
+
+    assert_equal 'Wanderer', note.title
+    assert_nil note.body
+  end
+
   def test_an_attribute_default_takes_an_option
     note = nil
     nudges = capture_stderr { note = DefaultedNote.new }
@@ -1281,6 +1415,46 @@ class BugTest < Minitest::Test
     assert_equal 0, note.rank
     assert_equal({ 'shelf' => 'new' }, note.meta)
     assert_nil note.title
+  end
+
+  # A custom type casts the value update_all binds, so an Option on that
+  # column has to be unwrapped before the type sees it.
+  def test_update_all_takes_an_option_on_a_custom_type
+    ledger = Ledger.create!(memo: 'opening')
+
+    Ledger.where(id: ledger.id).update_all(price: Some(Money.new(500)))
+
+    assert_equal Money.new(500), ledger.reload.price.unwrap!
+  end
+
+  def test_insert_all_takes_an_option_on_a_custom_type
+    Ledger.insert_all([{ memo: 'inserted', price: Some(Money.new(500)),
+                         created_at: Time.now, updated_at: Time.now }])
+
+    assert_equal Money.new(500), Ledger.find_by!(memo: 'inserted').price.unwrap!
+  end
+
+  def test_upsert_takes_an_option_on_a_custom_type
+    ledger = Ledger.create!(memo: 'opening')
+
+    Ledger.upsert({ id: ledger.id, memo: 'opening', price: Some(Money.new(500)),
+                    created_at: Time.now, updated_at: Time.now })
+
+    assert_equal Money.new(500), ledger.reload.price.unwrap!
+  end
+
+  # A default reaches the custom type's cast without passing a writer.
+  def test_an_attribute_default_on_a_custom_type_takes_an_option
+    assert_equal Money.new(500), DefaultedLedger.new.price
+    assert_nil UnpricedLedger.new.price
+  end
+
+  # find_by serializes through the custom type, which is the one boundary a
+  # Some reaches on a query rather than on a write.
+  def test_find_by_takes_an_option_on_a_custom_type
+    ledger = Ledger.create!(memo: 'closing', price: Money.new(1200))
+
+    assert_equal ledger.id, Ledger.find_by(price: Some(Money.new(1200))).id
   end
 
   # The predicate builder already unwraps a hash condition; unwrapping on

@@ -58,3 +58,18 @@ module DoctestOptionEquality
 end
 
 YARD::Doctest::Example.prepend(DoctestOptionEquality)
+
+# A declared default is cast on its way into a new record rather than assigned
+# through a writer.
+class DefaultedNote < ActiveRecord::Base
+  self.table_name = 'notes'
+  attribute :rank, :integer, default: Some(0)
+  attribute :title, :string, default: None()
+end
+
+# A Proc default is called when the record is built, so what it returns meets
+# the column type exactly where a literal default does.
+class ProcDefaultedNote < ActiveRecord::Base
+  self.table_name = 'notes'
+  attribute :title, :string, default: -> { Some('Wanderer') }
+end
