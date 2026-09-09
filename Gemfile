@@ -7,6 +7,7 @@ gemspec
 
 group :development do
   gem 'activerecord'
+  gem 'bcrypt'
   gem 'minitest'
   gem 'rails'
   gem 'rake', '~> 13.0'
