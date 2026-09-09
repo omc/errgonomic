@@ -283,7 +283,7 @@ module Errgonomic
       #   None().present_or_raise!("no secret") # => raise Errgonomic::NotPresentError, "no secret"
       #   None().present_or_raise! { "no secret for #{7}" } # => raise Errgonomic::NotPresentError, "no secret for 7"
       def present_or_raise!(message = nil, &block)
-        presence_nudge('present_or_raise', 'expect!')
+        presence_nudge('present_or_raise!', 'expect!')
         raise Errgonomic::NotPresentError, block ? block.call : message if none?
 
         value
@@ -306,9 +306,12 @@ module Errgonomic
       #   Some(1).present_or(2)
       #   nudges = StringIO.new
       #   original = $stderr
-      #   $stderr = nudges
-      #   Some(1).present_or(2)
-      #   $stderr = original
+      #   begin
+      #     $stderr = nudges
+      #     Some(1).present_or(2)
+      #   ensure
+      #     $stderr = original
+      #   end
       #   nudges.string # => ""
       def present_or(default)
         presence_nudge('present_or', 'unwrap_or')
@@ -349,10 +352,13 @@ module Errgonomic
       # @example the Rails spelling of unwrap_or(nil), and no nudge with it
       #   nudges = StringIO.new
       #   original = $stderr
-      #   $stderr = nudges
-      #   captured = Some("").presence
-      #   None().presence
-      #   $stderr = original
+      #   begin
+      #     $stderr = nudges
+      #     captured = Some("").presence
+      #     None().presence
+      #   ensure
+      #     $stderr = original
+      #   end
       #   captured # => ""
       #   nudges.string # => ""
       def presence
@@ -418,8 +424,10 @@ module Errgonomic
       #   Some(1).each.to_a # => [1]
       #   None().each.to_a # => []
       #   Some(2).each.map { |x| x * 3 } # => [6]
+      #   Some(1).each.size # => 1
+      #   None().each.size # => 0
       def each(&block)
-        return to_enum(:each) unless block
+        return to_enum(:each) { some? ? 1 : 0 } unless block
 
         block.call(value) if some?
         self

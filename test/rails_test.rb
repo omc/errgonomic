@@ -1346,8 +1346,8 @@ class BugTest < Minitest::Test
     assert note.reload.meta.none?
   end
 
-  # A numeric writer reaches its value without Option#presence, which is
-  # soft-deprecated and nudges on stderr on every call.
+  # A numeric writer reaches its value without the soft-deprecated presence
+  # helpers, which nudge on stderr.
   def test_a_numeric_writer_takes_an_option_without_a_deprecation_nudge
     note = nil
     nudges = capture_stderr do
@@ -1890,6 +1890,18 @@ class BugTest < Minitest::Test
   # all of them.
   def test_validating_a_converted_record_with_no_validations_does_not_raise
     assert_predicate Note.new, :valid?
+  end
+
+  # The nudge names the method the caller wrote, bang and all. It fires once
+  # per process, so this asks for it back before listening.
+  def test_the_present_or_raise_nudge_names_the_method_with_its_bang
+    Errgonomic::Option::Any::NUDGED.delete('present_or_raise!')
+
+    nudges = capture_stderr do
+      assert_raises(Errgonomic::NotPresentError) { None().present_or_raise!('no bio') }
+    end
+
+    assert_includes nudges, '`present_or_raise!`'
   end
 
   # ActiveSupport's Object#try asks respond_to?, which an Option answers

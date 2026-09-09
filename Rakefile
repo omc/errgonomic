@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'bundler/gem_tasks'
+require 'shellwords'
 
 require 'rake/testtask'
 Rake::TestTask.new(:test) do |t|
@@ -19,7 +20,7 @@ end
 namespace :test do
   desc 'Run the Rails integration suite with strict equality on'
   task :strict do
-    ruby '-Ilib -Itest test/support/strict_equality.rb'
+    ruby '-Ilib', '-Itest', 'test/support/strict_equality.rb', *Shellwords.split(ENV.fetch('TESTOPTS', ''))
   end
 end
 
