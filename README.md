@@ -95,6 +95,8 @@ Some(1).expect!("must be set")   # => 1
 
 Some(1).map { |x| x + 1 }        # => Some(2)
 Some(2).and_then { |x| Some(x + 1) } # => Some(3)
+Some(2).map_or(0) { |x| x * 2 }  # => 4, a bare value
+None().map_or(0) { |x| x * 2 }   # => 0
 None().or(Some(1))               # => Some(1)
 Some(:left).xor(None())          # => Some(:left)
 Some(1).zip(Some(2))             # => Some([1, 2])

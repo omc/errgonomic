@@ -470,34 +470,33 @@ module Errgonomic
         Some(block.call(value))
       end
 
-      # Returns the provided default (if none), or applies a function to the
-      # contained value (if some). If you want lazy evaluation for the provided
-      # value, use +map_or_else+.
+      # Returns the provided default (if none), or the block applied to the
+      # contained value (if some). Both come back bare, as Rust's map_or
+      # gives: this is the exit from the Option, where map stays inside it.
+      # Use +map_or_else+ when the default is expensive to build.
       #
       # @example
-      #   None().map_or(1) { 100 } # => Some(1)
-      #   Some(1).map_or(100) { |x| x + 1 } # => Some(2)
-      #   Some("foo").map_or(0) { |str| str.length } # => Some(3)
+      #   None().map_or(1) { 100 } # => 1
+      #   Some(1).map_or(100) { |x| x + 1 } # => 2
+      #   Some("foo").map_or(0) { |str| str.length } # => 3
+      #   Some(2).map_or(0) { |x| x * 2 } # => 4
       def map_or(default, &block)
-        return Some(default) if none?
+        return default if none?
 
-        Some(block.call(value))
+        block.call(value)
       end
 
       # Computes a default from the given Proc if None, or applies the block to
-      # the contained value (if Some).
+      # the contained value (if Some). Both come back bare, as map_or's do.
       #
       # @example
-      #   None().map_or_else(-> { :foo }) { :bar } # => Some(:foo)
-      #   Some("str").map_or_else(-> { 100 }) { |str| str.length } # => Some(3)
-      #   None().map_or_else( -> { nil }) { |str| str.length } # => None()
+      #   None().map_or_else(-> { :foo }) { :bar } # => :foo
+      #   Some("str").map_or_else(-> { 100 }) { |str| str.length } # => 3
+      #   None().map_or_else(-> { nil }) { |str| str.length } # => nil
       def map_or_else(proc, &block)
-        if none?
-          val = proc.call
-          return val ? Some(val) : None()
-        end
+        return proc.call if none?
 
-        Some(block.call(value))
+        block.call(value)
       end
 
       # convert the option into a result where Some is Ok and None is Err
