@@ -42,11 +42,82 @@
 - `Errgonomic::SerializeError` names the value that went unhandled: `cannot serialize an unwrapped Some("cell-a1b2")` rather than `cannot serialize an unwrapped Option`, with the value's `inspect` bounded to 60 characters so a large one does not bury the message. A payload built out of many values now says which one raised
 - [Dev, Test] - Doctests run against an in-memory ActiveRecord connection, so an `@example` under `lib/errgonomic/rails` specifies the integration the same way every other example specifies the core
 
-## [0.4.1] - 2025-02-20
+## [0.8.3] - 2026-08-12
+
+- A `has_one` reads as an Option, the way an optional `belongs_to` already did
+- A singular association with `accepts_nested_attributes_for` is left unwrapped, so nested attribute assignment keeps working
+- `to_option` on an Option returns it unchanged instead of wrapping it a second time
+
+## [0.8.2] - 2026-08-12
+
+- `as_json` refuses an unwrapped Option or Result with `Errgonomic::SerializeError`, so a container cannot reach a payload as an undefined structure
+- Nullable columns wrap when the schema loads rather than when the concern is included, and an optional `belongs_to` declared after the include is wrapped too
+- Including the concern on a base class reaches every model beneath it
+- `errgonomic_optionals` reports the wrapped columns as well as the wrapped associations
+
+## [0.8.1] - 2026-08-12
+
+- Presence helpers on an Option hand back the value inside it: `present_or` and its family unwrap rather than returning the wrapper. The family is soft-deprecated on Options in favor of the combinators and nudges toward them on stderr, and the blank side raises a teaching error
+- A query written with an Option finds its rows: the predicate builder unwraps, so `where(col: Some(v))` binds the value
+- An encrypted attribute is left unwrapped, and `errgonomic_optional_except` opts a named attribute out of wrapping
+- [Dev] - Bump activestorage and json past their security advisories
+
+## [0.8.0] - 2026-08-07
+
+- `Option#present?` and `#blank?` follow the discriminant, not the inner value: `Some(false)` and `Some(nil)` are present, `None()` is blank
+- New combinators: `Option#filter`, `Option#flatten` and `Option#xor`
+- Booleans lift into the containers: `true.then_some(v)`, `false.ok_or(err)`, and the lazy block forms of each
+- Optional collections: `OptionalHash` and `OptionalArray` return an Option from a lookup, and `dig` walks a nested wrapper and checks array bounds instead of raising
+- `inspect` reads as `Some(1)` and `Err(:nope)`, so a container is legible in a debugger or a test failure
+- Option and Result satisfy Ruby's `eql?`/`hash` contract, so they work as hash keys
+- Ordering follows Rust: `None` sorts before `Some`, `Ok` before `Err`
+- A method an Option does not define raises `Errgonomic::UnwrappedAccessError` naming the combinators to reach for, rather than a bare `NoMethodError`
+- The Rust spellings `is_some`, `is_none`, `is_some_and`, `is_none_or` and their Result counterparts delegate to the Ruby predicates, with a nudge on stderr
+- A wrapped reader that re-enters itself raises `Errgonomic::RecursiveOptionalReadError` at the first repeated read, instead of measuring call stack depth and failing thousands of frames later
+- `delegate_optional` honors `private:`
+- Docs: the README covers the current API, Option equality semantics and when `unwrap!` is appropriate, and the ActiveRecord compromises are written down as a named, closed register
+- [Dev, Test] - The gem builds as a flake output with gems from gems4nix, CI tracks the latest Ruby 3.4, the tree is rubocop clean, and CONTRIBUTING states the development methodology
+
+## [0.7.0] - 2026-04-22
+
+- `Result#map_err` maps the error of an `Err` and leaves an `Ok` alone
+- `Result#deconstruct` makes a Result pattern matchable: `case result in Errgonomic::Result::Ok, value`
+
+## [0.6.0] - 2026-03-23
+
+- Breaking: `and_then` yields the inner value and `or_else` yields the inner error, where both used to yield the container
+- Opting out of the pedantic block checks now works. `give_me_ambiguous_downstream_errors` was read through an expression that was always true, so the check fired whatever you set; the default is still to raise when a combinator's block returns something other than an Option or Result
+- `Result#map` returns a new `Ok` instead of mutating the receiver in place
+- `UnwrapError#value` exposes the inner error, and the value argument is optional
+- `ActiveRecordOptional` is opt-in per model: a model includes the concern itself and `Errgonomic::Rails.setup_after` wraps nothing
+- [Dev, Test] - Replace rspec with minitest, and run `rake test` in CI alongside the doctests
+
+## [0.5.1] - 2026-03-03
+
+- `TypeMismatchError` descends from `Errgonomic::Error` again, so `rescue Errgonomic::Error` catches it
+
+## [0.5.0] - 2026-03-02
+
+- An unwrapped Option or Result refuses to serialize: `to_s` and `to_json` raise the new `Errgonomic::SerializeError` rather than emitting an undefined structure. Interpolating a container into a string now raises
+- `TypeMismatchError` descends from `Errgonomic::TypeError`, a new subclass of Ruby's `TypeError`
+
+## [0.4.2] - 2026-02-27
+
+- An Option binds into a query: the connection adapter quotes `Some(v)` as the value it wraps and `None()` as `NULL`
+- `Errgonomic::Rails.setup_after` no longer eager loads the application to wrap every model with a table. A model that wants wrapped readers includes `Errgonomic::Rails::ActiveRecordOptional` itself
+
+## [0.4.1] - 2026-02-20
 
 - Bugfix: `unwrap_or_else` yields the inner error
 
-## [0.2.0] - 2025-05-01
+## [0.4.0] - 2025-11-24
+
+- ActiveRecord integration: a model that includes `Errgonomic::Rails::ActiveRecordOptional` reads its nullable columns and optional `belongs_to` associations as Options, and `validates :x, some: true` is the matching presence check
+- `delegate_optional` defines a reader that maps a method through an optional association
+- `Result#map`, `Result#tap_ok` and `Result#tap_err`
+- `Err#unwrap!` raises an `UnwrapError` carrying the inner error value
+
+## [0.3.0] - 2025-05-01
 
 - Type assertions: `type_or_raise!`, `type_or`
 
