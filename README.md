@@ -113,7 +113,9 @@ in Errgonomic::Option::None
 end
 ```
 
-An unhandled Option refuses to leak into your output: `to_s`, `to_json`, and `as_json` raise `Errgonomic::SerializeError`, so you handle the inner value deliberately rather than shipping `#<Errgonomic::Option::Some...>` to a user. The refusal covers `as_json` because Hash and Array serialization recurses through that method, and an Option nested in a payload would otherwise serialize as `{"value": ...}`. A converted ActiveRecord model is the one exception, at the model boundary: it unwraps each attribute as it serializes, so a record's own `as_json` says what an unconverted record's says. See [Rails integration](#rails-integration).
+An unhandled Option refuses to leak into your output: `to_json` and `as_json` raise `Errgonomic::SerializeError`, so you handle the inner value deliberately rather than shipping `#<Errgonomic::Option::Some...>` to a user. The refusal covers `as_json` because Hash and Array serialization recurses through that method, and an Option nested in a payload would otherwise serialize as `{"value": ...}`. A converted ActiveRecord model is the one exception, at the model boundary: it unwraps each attribute as it serializes, so a record's own `as_json` says what an unconverted record's says. See [Rails integration](#rails-integration).
+
+`to_s` renders rather than refusing: `Some(1).to_s` is `"Some(1)"` and `None().to_s` is `"None"`, matching `inspect`, and the same holds for `Ok` and `Err`. Rust gives `Option` a `Debug` and no `Display`, so raising was the faithful reading, but a `to_s` that raises replaces the real exception while a `rescue` builds its log line, which is the worst possible place to be strict. The rendered form is unambiguous: a `Some(1)` in a log says a wrapper arrived where a value was meant.
 
 `unwrap!` and `expect!` are for tests and consoles, not application code: they raise on `None`, which is exactly the ambiguous failure the type exists to prevent. Application code should always have a combinator or pattern match that handles the `None` branch explicitly; if none fits, that is a gap worth an issue rather than a reason to unwrap.
 
@@ -160,7 +162,7 @@ in Errgonomic::Result::Err, Exception => e
 end
 ```
 
-Like Options, unwrapped Results refuse `to_s`, `to_json`, and `as_json`. And `Object#result?` / `Object#assert_result!` help enforce at runtime that a value is a Result.
+Like Options, unwrapped Results refuse `to_json` and `as_json`, and render `to_s` as `inspect` does. And `Object#result?` / `Object#assert_result!` help enforce at runtime that a value is a Result.
 
 ### Optional collections
 

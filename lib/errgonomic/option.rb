@@ -573,13 +573,18 @@ module Errgonomic
         Some(other)
       end
 
-      # Refuse to serialize an unwrapped Option as a String. Options must be
-      # correctly handled to access their inner value.
+      # Render as inspect does. Rust gives Option a Debug and no Display, so
+      # refusing was faithful, but a to_s that raises replaces the real
+      # exception while a rescue builds its log line, and the rendered form
+      # says plainly that a wrapper arrived where a value was meant.
       #
       # @example
-      #   None().to_s # => raise Errgonomic::SerializeError, "cannot serialize an unwrapped Option"
+      #   Some(1).to_s # => "Some(1)"
+      #   Some("x").to_s # => "Some(\"x\")"
+      #   None().to_s # => "None"
+      #   "value: #{Some(1)}" # => "value: Some(1)"
       def to_s
-        raise Errgonomic::SerializeError, 'cannot serialize an unwrapped Option'
+        inspect
       end
 
       # Refuse to serialize an unwrapped Option as JSON. Not only should we

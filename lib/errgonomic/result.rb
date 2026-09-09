@@ -347,14 +347,18 @@ module Errgonomic
         Err(block.call(value))
       end
 
-      # Refuse to serialize an unwrapped Result as a String. Results must be
-      # correctly handled to access their inner value.
+      # Render as inspect does. Rust gives Result a Debug and no Display, so
+      # refusing was faithful, but a to_s that raises replaces the real
+      # exception while a rescue builds its log line, and the rendered form
+      # says plainly that a wrapper arrived where a value was meant.
       #
       # @example
-      #   Ok("").to_s # => raise Errgonomic::SerializeError, "cannot serialize an unwrapped Result"
-      #   Err("").to_s # => raise Errgonomic::SerializeError, "cannot serialize an unwrapped Result"
+      #   Ok(1).to_s # => "Ok(1)"
+      #   Err(:nope).to_s # => "Err(:nope)"
+      #   Err().to_s # => "Err()"
+      #   "outcome: #{Ok(1)}" # => "outcome: Ok(1)"
       def to_s
-        raise Errgonomic::SerializeError, 'cannot serialize an unwrapped Result'
+        inspect
       end
 
       # Refuse to serialize an unwrapped Result as JSON. Not only should we
