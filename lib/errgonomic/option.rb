@@ -97,11 +97,20 @@ module Errgonomic
       #     begin
       #       Some(5) != 5
       #     rescue Errgonomic::TypeMismatchError => e
-      #       e.class
+      #       e.message.include?("!=")
       #     end
-      #   end # => Errgonomic::TypeMismatchError
+      #   end # => true
       #   Errgonomic.with_strict_equality { Some(5) == Some(5) } # => true
       #   Errgonomic.with_strict_equality { Some(5) == None() } # => false
+      #
+      # @example a Result is another container, not another Option
+      #   Errgonomic.with_strict_equality do
+      #     begin
+      #       Some(1) == Ok(1)
+      #     rescue Errgonomic::TypeMismatchError => e
+      #       e.message.include?("different containers")
+      #     end
+      #   end # => true
       #
       # @example nil is another type, and absence here is the discriminant
       #   Errgonomic.with_strict_equality do
@@ -140,6 +149,13 @@ module Errgonomic
       #     end
       #   end # => Errgonomic::TypeMismatchError
       #   Errgonomic.with_strict_equality { Some(5).hash == Some(5).hash } # => true
+      # Ruby derives != from ==, so a strict-equality message would name the
+      # operator the caller did not write.
+      def !=(other)
+        strict_equality!(other, '!=')
+        super
+      end
+
       def eql?(other)
         strict_equality!(other, 'eql?')
         return false if self.class != other.class
@@ -743,10 +759,22 @@ module Errgonomic
         return unless Errgonomic.strict_equality?
         return if other.is_a?(Errgonomic::Option::Any)
 
-        raise Errgonomic::TypeMismatchError, <<~MSG
-          #{self.class} #{operator} #{other.class} compares an Option to a value that is not one, which strict equality refuses.
-          #{other.nil? ? 'Absence here is the discriminant: ask none?, or nil? under the Rails integration.' : "Compare Options (opt == Some(#{other.inspect})), test the inner value (opt.some_and? { |v| v == #{other.inspect} }), or unwrap_or a fallback first."}
-        MSG
+        raise Errgonomic::TypeMismatchError,
+              "#{self.class} #{operator} #{other.class}, which strict equality refuses.\n" \
+              "#{strict_equality_remedy(other)}"
+      end
+
+      def strict_equality_remedy(other)
+        case other
+        when Errgonomic::Result::Any
+          'An Option and a Result are different containers, and neither is the other. ' \
+            'Unwrap the one you meant (opt.unwrap_or(nil) == res.unwrap_or(nil)).'
+        when nil
+          'Absence here is the discriminant: ask none?, or nil? under the Rails integration.'
+        else
+          "Compare Options (opt == Some(#{other.inspect})), test the inner value " \
+            "(opt.some_and? { |v| v == #{other.inspect} }), or unwrap_or a fallback first."
+        end
       end
 
       def raise_blank_side_teaching(name)

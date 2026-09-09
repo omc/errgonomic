@@ -97,6 +97,22 @@ module Errgonomic
       #     end
       #   end # => Errgonomic::TypeMismatchError
       #   Errgonomic.with_strict_equality { Ok(1) == Ok(1) } # => true
+      #   Errgonomic.with_strict_equality do
+      #     begin
+      #       Ok(1) != 1
+      #     rescue Errgonomic::TypeMismatchError => e
+      #       e.message.include?("!=")
+      #     end
+      #   end # => true
+      #
+      # @example an Option is another container, not another Result
+      #   Errgonomic.with_strict_equality do
+      #     begin
+      #       Ok(1) == Some(1)
+      #     rescue Errgonomic::TypeMismatchError => e
+      #       e.message.include?("different containers")
+      #     end
+      #   end # => true
       def ==(other)
         strict_equality!(other, '==')
         return false if self.class != other.class
@@ -124,6 +140,13 @@ module Errgonomic
       #     end
       #   end # => Errgonomic::TypeMismatchError
       #   Errgonomic.with_strict_equality { Ok(5).hash == Ok(5).hash } # => true
+      # Ruby derives != from ==, so a strict-equality message would name the
+      # operator the caller did not write.
+      def !=(other)
+        strict_equality!(other, '!=')
+        super
+      end
+
       def eql?(other)
         strict_equality!(other, 'eql?')
         self.class == other.class && value.eql?(other.value)
@@ -441,10 +464,19 @@ module Errgonomic
         return unless Errgonomic.strict_equality?
         return if other.is_a?(Errgonomic::Result::Any)
 
-        raise Errgonomic::TypeMismatchError, <<~MSG
-          #{self.class} #{operator} #{other.class} compares a Result to a value that is not one, which strict equality refuses.
-          Compare Results (res == Ok(#{other.inspect})), test the inner value (res.ok_and? { |v| v == #{other.inspect} }), or unwrap_or a fallback first.
+        raise Errgonomic::TypeMismatchError,
+              "#{self.class} #{operator} #{other.class}, which strict equality refuses.\n" \
+              "#{strict_equality_remedy(other)}"
+      end
+
+      def strict_equality_remedy(other)
+        return <<~MSG.chomp if other.is_a?(Errgonomic::Option::Any)
+          A Result and an Option are different containers, and neither is the other.
+          Unwrap the one you meant (res.unwrap_or(nil) == opt.unwrap_or(nil)).
         MSG
+
+        "Compare Results (res == Ok(#{other.inspect})), test the inner value " \
+          "(res.ok_and? { |v| v == #{other.inspect} }), or unwrap_or a fallback first."
       end
     end
 

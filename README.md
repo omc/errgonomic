@@ -257,10 +257,17 @@ Some(5) != 5        # => raises
 Some(5).eql?(5)     # => raises
 None() == nil       # => raises, pointing at none?
 Ok(1) == 1          # => raises
+Some(1) == Ok(1)    # => raises: an Option and a Result are different containers
 Some(5) == Some(5)  # => true, as always
+
+1 == Some(1)        # => raises, through Integer's coercion fallback
+nil == None()       # => false, quietly
+"a" == Some("a")    # => false, quietly
 ```
 
-Two Options, or two Results, compare as they always did, and `hash` is untouched, so an Option stays usable as a Hash key with it on. It is meant for a test suite or CI, not for production, and there is a block form for scoping it the way the ambiguous-error opt-out is scoped:
+A Result is cross-type for an Option and an Option is cross-type for a Result: they are different containers, neither is the other, and the message says to unwrap whichever one you meant. Two Options, or two Results, compare as they always did, and `hash` is untouched, so an Option stays usable as a Hash key with it on.
+
+Strictness fires when the wrapper is the receiver, and also when the left operand hands the comparison over: `1 == Some(1)` raises because `Integer#==` falls back to asking the right-hand side. `nil == None()` and `"a" == Some("a")` stay quietly false, because `NilClass` and `String` answer for themselves and never consult the operand. Put the wrapper on the left in a test if you want the check to reach every comparison. It is meant for a test suite or CI, not for production, and there is a block form for scoping it the way the ambiguous-error opt-out is scoped:
 
 ```ruby
 Errgonomic.with_strict_equality do
