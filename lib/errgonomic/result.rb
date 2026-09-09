@@ -87,7 +87,18 @@ module Errgonomic
       #   Ok(1).object_id == Ok(1).object_id # => false
       #   Ok(1) == 1 # => false
       #   Err() == nil # => false
+      #
+      # @example strict equality makes a cross-type comparison an error
+      #   Errgonomic.with_strict_equality do
+      #     begin
+      #       Ok(1) == 1
+      #     rescue Errgonomic::TypeMismatchError => e
+      #       e.class
+      #     end
+      #   end # => Errgonomic::TypeMismatchError
+      #   Errgonomic.with_strict_equality { Ok(1) == Ok(1) } # => true
       def ==(other)
+        strict_equality!(other, '==')
         return false if self.class != other.class
 
         value == other.value
@@ -103,7 +114,18 @@ module Errgonomic
       #   Ok(1).eql?(Err(1)) # => false
       #   { Ok(5) => 1 }[Ok(5)] # => 1
       #   [Err(:a), Err(:a)].uniq # => [Err(:a)]
+      #
+      # @example strict equality reaches eql?, and leaves hash alone
+      #   Errgonomic.with_strict_equality do
+      #     begin
+      #       Ok(5).eql?(5)
+      #     rescue Errgonomic::TypeMismatchError => e
+      #       e.class
+      #     end
+      #   end # => Errgonomic::TypeMismatchError
+      #   Errgonomic.with_strict_equality { Ok(5).hash == Ok(5).hash } # => true
       def eql?(other)
+        strict_equality!(other, 'eql?')
         self.class == other.class && value.eql?(other.value)
       end
 
@@ -412,6 +434,18 @@ module Errgonomic
       def deconstruct
         [self, value]
       end
+
+      private
+
+      def strict_equality!(other, operator)
+        return unless Errgonomic.strict_equality?
+        return if other.is_a?(Errgonomic::Result::Any)
+
+        raise Errgonomic::TypeMismatchError, <<~MSG
+          #{self.class} #{operator} #{other.class} compares a Result to a value that is not one, which strict equality refuses.
+          Compare Results (res == Ok(#{other.inspect})), test the inner value (res.ok_and? { |v| v == #{other.inspect} }), or unwrap_or a fallback first.
+        MSG
+      end
     end
 
     # The Ok variant.
@@ -480,8 +514,9 @@ module Errgonomic
       # @example
       #   Err(:nope).inspect # => "Err(:nope)"
       #   Err().inspect # => "Err()"
+      #   Errgonomic.with_strict_equality { Err(Some(1)).inspect } # => "Err(Some(1))"
       def inspect
-        return 'Err()' if value == Arbitrary
+        return 'Err()' if value.equal?(Arbitrary)
 
         "Err(#{value.inspect})"
       end

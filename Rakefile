@@ -16,7 +16,16 @@ YARD::Doctest::RakeTask.new do |task|
   task.pattern = FileList['lib/**/*.rb'].join(' ')
 end
 
-task default: %i[test yard:doctest]
+namespace :test do
+  desc 'Run the Rails integration suite with strict equality on'
+  task :strict do
+    ruby '-Ilib -Itest test/support/strict_equality.rb'
+  end
+end
+
+# yard:doctest ends the process when it finishes, so anything after it in
+# the default list would never run.
+task default: %i[test test:strict yard:doctest]
 
 namespace :gems4nix do
   desc 'Regenerate gem-groups.json after Gemfile/Gemfile.lock changes'

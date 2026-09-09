@@ -131,7 +131,7 @@ Writers unwrap under that integration, which changes what a truthiness slip cost
 
 The remaining present-side helpers are soft-deprecated on Options in favor of the combinators. They unwrap, where on any other object they return the receiver: `Some(v).present_or_raise!(msg)`, `present_or(default)` and `present_or_else { }` all yield `v`, and `None` raises, substitutes, or computes. Each prints a one-line stderr nudge naming the combinator to use instead (`expect!`, `unwrap_or`, `unwrap_or_else`), once per process per method rather than once per call, so a hot path does not flood the log. The blank side (`blank_or*`) raises `UnwrappedAccessError` outright: an Option's blankness is its discriminant, so test it with `none?`.
 
-Equality is between Options only: `Some(5) == Some(5)`, but `Some(5) == 5` and `None() == nil` are `false`. That is quiet, never an error, matching how every Ruby object compares across types. Rust rejects `Some(5) == 5` at compile time; Ruby cannot, so guard the idiom in review and tests: compare against a wrapped value (`opt == Some(5)`) or test the inner value (`opt.some_and? { |v| v == 5 }`).
+Equality is between Options only: `Some(5) == Some(5)`, but `Some(5) == 5` and `None() == nil` are `false`. That is quiet, never an error, matching how every Ruby object compares across types. Rust rejects `Some(5) == 5` at compile time; Ruby cannot, so guard the idiom in review and tests: compare against a wrapped value (`opt == Some(5)`) or test the inner value (`opt.some_and? { |v| v == 5 }`). `Errgonomic.strict_equality = true` turns that guard into an error, which is what a test suite wants; see [Pedantic runtime checks](#pedantic-runtime-checks).
 
 ### Result
 
@@ -235,6 +235,29 @@ Errgonomic.with_ambiguous_downstream_errors do
   # anything goes in here
 end
 ```
+
+Cross-type equality is the other pedantic check, and it is off by default because a quiet `false` is what every Ruby object answers. Turn it on and a comparison between a wrapper and a value that is not one raises `Errgonomic::TypeMismatchError`, naming both classes and the spelling to reach for:
+
+```ruby
+Errgonomic.strict_equality = true
+
+Some(5) == 5        # => raises Errgonomic::TypeMismatchError
+Some(5) != 5        # => raises
+Some(5).eql?(5)     # => raises
+None() == nil       # => raises, pointing at none?
+Ok(1) == 1          # => raises
+Some(5) == Some(5)  # => true, as always
+```
+
+Two Options, or two Results, compare as they always did, and `hash` is untouched, so an Option stays usable as a Hash key with it on. It is meant for a test suite or CI, not for production, and there is a block form for scoping it the way the ambiguous-error opt-out is scoped:
+
+```ruby
+Errgonomic.with_strict_equality do
+  assert_equal Some(5), book.pages
+end
+```
+
+This gem runs its own Rails integration suite that way, as `rake test:strict`.
 
 ### Rails integration
 

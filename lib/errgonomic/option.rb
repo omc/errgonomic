@@ -84,7 +84,35 @@ module Errgonomic
       #   None() == None() # => true
       #   Some(1) == 1 # => false
       #   None() == nil # => false
+      #
+      # @example strict equality makes a cross-type comparison an error
+      #   Errgonomic.with_strict_equality do
+      #     begin
+      #       Some(5) == 5
+      #     rescue Errgonomic::TypeMismatchError => e
+      #       e.class
+      #     end
+      #   end # => Errgonomic::TypeMismatchError
+      #   Errgonomic.with_strict_equality do
+      #     begin
+      #       Some(5) != 5
+      #     rescue Errgonomic::TypeMismatchError => e
+      #       e.class
+      #     end
+      #   end # => Errgonomic::TypeMismatchError
+      #   Errgonomic.with_strict_equality { Some(5) == Some(5) } # => true
+      #   Errgonomic.with_strict_equality { Some(5) == None() } # => false
+      #
+      # @example nil is another type, and absence here is the discriminant
+      #   Errgonomic.with_strict_equality do
+      #     begin
+      #       None() == nil
+      #     rescue Errgonomic::TypeMismatchError => e
+      #       e.message.include?("none?")
+      #     end
+      #   end # => true
       def ==(other)
+        strict_equality!(other, '==')
         return false if self.class != other.class
         return true if none?
 
@@ -102,7 +130,18 @@ module Errgonomic
       #   None().eql?(None()) # => true
       #   { Some(5) => 1 }[Some(5)] # => 1
       #   [Some(1), Some(1), None(), None()].uniq # => [Some(1), None()]
+      #
+      # @example strict equality reaches eql?, and leaves hash alone
+      #   Errgonomic.with_strict_equality do
+      #     begin
+      #       Some(5).eql?(5)
+      #     rescue Errgonomic::TypeMismatchError => e
+      #       e.class
+      #     end
+      #   end # => Errgonomic::TypeMismatchError
+      #   Errgonomic.with_strict_equality { Some(5).hash == Some(5).hash } # => true
       def eql?(other)
+        strict_equality!(other, 'eql?')
         return false if self.class != other.class
         return true if none?
 
@@ -673,6 +712,16 @@ module Errgonomic
         return unless NUDGED.add?(from)
 
         warn "Errgonomic: `#{from}` on an Option is soft-deprecated; prefer `#{to}`."
+      end
+
+      def strict_equality!(other, operator)
+        return unless Errgonomic.strict_equality?
+        return if other.is_a?(Errgonomic::Option::Any)
+
+        raise Errgonomic::TypeMismatchError, <<~MSG
+          #{self.class} #{operator} #{other.class} compares an Option to a value that is not one, which strict equality refuses.
+          #{other.nil? ? 'Absence here is the discriminant: ask none?, or nil? under the Rails integration.' : "Compare Options (opt == Some(#{other.inspect})), test the inner value (opt.some_and? { |v| v == #{other.inspect} }), or unwrap_or a fallback first."}
+        MSG
       end
 
       def raise_blank_side_teaching(name)

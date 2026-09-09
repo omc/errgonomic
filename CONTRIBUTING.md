@@ -30,6 +30,7 @@ The inner rungs run constantly; the outer rungs are slower and run when preparin
 bundle exec rubocop        # formatted & lint-clean
 bundle exec yard doctest   # doctests pass — most behavior is specified here
 bundle exec rake test      # unit tests pass (incl. the Rails integration test)
+bundle exec rake test:strict # the same suite with cross-type equality raising
 ```
 
 A change that fails any of these is not ready. Keep formatting-only changes in their own commit so they do not obscure a behavioral diff. `bundle exec rake` runs the full suite (test + yard:doctest) in one shot.
@@ -42,7 +43,7 @@ nix build .#errgonomic           # the gem builds as a derivation; rake runs in 
 nix flake check --all-systems    # builds every check on the local system, evaluates all four
 ```
 
-**After push (CI gate):** a push is done when CI is green, not when `git push` succeeds. Check whatever CI this repo runs (`gh run list`, `gh run view --log-failed`); checks take minutes, so it is fine to schedule the check as a followup and keep working — but the change is not landed until they pass. A CI failure is a regression: diagnose it from the logs, reproduce it locally where you can, and capture it as a test so it cannot recur silently. CI earns you the coverage you cannot run locally — a target your machine isn't, a matrix leg, a slower suite — for free. Here, CI (`.github/workflows/main.yml`) runs `yard doctest` and `rake test` on the latest Ruby 3.4.x on ubuntu-latest, matching the Ruby pinned by the flake.
+**After push (CI gate):** a push is done when CI is green, not when `git push` succeeds. Check whatever CI this repo runs (`gh run list`, `gh run view --log-failed`); checks take minutes, so it is fine to schedule the check as a followup and keep working — but the change is not landed until they pass. A CI failure is a regression: diagnose it from the logs, reproduce it locally where you can, and capture it as a test so it cannot recur silently. CI earns you the coverage you cannot run locally — a target your machine isn't, a matrix leg, a slower suite — for free. Here, CI (`.github/workflows/main.yml`) runs `yard doctest`, `rake test` and `rake test:strict` on the latest Ruby 3.4.x on ubuntu-latest, matching the Ruby pinned by the flake.
 
 Tests *are* the requirements: a behavior is defined by the test that asserts it. Prefer doctests where an example clarifies a function's contract — they document and test at once and cannot drift out of date without failing the build. In this repo, the YARD `@example` blocks under `lib/**/*.rb` are the primary suite.
 
