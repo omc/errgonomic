@@ -1,5 +1,8 @@
 # frozen_string_literal: true
 
+require 'set'
+require 'stringio'
+
 module Errgonomic
   module Option
     # The base class for all options. Some and None are subclasses.
@@ -19,6 +22,11 @@ module Errgonomic
         is_some_and: :some_and?,
         is_none_or: :none_or?
       }.freeze
+
+      # Names already nudged about. A soft deprecation is a message to a
+      # developer, and one per process says it; one per call turns a hot
+      # path into a stderr flood.
+      NUDGED = Set.new
 
       # An Option deliberately forwards nothing to its inner value, so a miss
       # here is almost always someone treating the container as its contents.
@@ -201,10 +209,11 @@ module Errgonomic
       # The presence helpers on Object keep their receiver; on an Option that
       # would hand back the wrapper where the caller asked for a value. Here
       # the present side unwraps instead, so a name that reads like an
-      # accessor behaves like one. The whole family is soft-deprecated on
-      # Options in favor of the combinators, so each call nudges via stderr,
-      # and the blank side, which has no working call sites to preserve,
-      # teaches rather than guesses at semantics.
+      # accessor behaves like one. The +_or+ spellings are soft-deprecated on
+      # Options in favor of the combinators and nudge via stderr; `presence`
+      # is the Rails idiom for unwrap_or(nil) and stays. The blank side, which
+      # has no working call sites to preserve, teaches rather than guesses at
+      # semantics.
 
       # Returns the inner value of a Some, and raises on a None. Presence
       # follows the discriminant, so Some(nil) yields nil.
@@ -235,6 +244,15 @@ module Errgonomic
       # @example
       #   Some("secret").present_or("fallback") # => "secret"
       #   None().present_or("fallback") # => "fallback"
+      #
+      # @example the nudge fires once per process, so a hot path stays quiet
+      #   Some(1).present_or(2)
+      #   nudges = StringIO.new
+      #   original = $stderr
+      #   $stderr = nudges
+      #   Some(1).present_or(2)
+      #   $stderr = original
+      #   nudges.string # => ""
       def present_or(default)
         presence_nudge('present_or', 'unwrap_or')
         return default if none?
@@ -260,15 +278,27 @@ module Errgonomic
 
       # Returns the inner value of a Some, and nil on a None, so the Rails
       # +presence || default+ idiom reaches the value rather than the wrapper.
+      # Presence follows the discriminant, so a blank inner value is still a
+      # value: Some("").presence is "", where Object#presence answers nil.
       #
       # @return [Object, nil] The inner value of a Some, otherwise nil.
       #
       # @example
       #   Some("secret").presence # => "secret"
+      #   Some("").presence # => ""
       #   None().presence # => nil
       #   None().presence || "fallback" # => "fallback"
+      #
+      # @example the Rails spelling of unwrap_or(nil), and no nudge with it
+      #   nudges = StringIO.new
+      #   original = $stderr
+      #   $stderr = nudges
+      #   captured = Some("").presence
+      #   None().presence
+      #   $stderr = original
+      #   captured # => ""
+      #   nudges.string # => ""
       def presence
-        presence_nudge('presence', 'unwrap_or(nil)')
         return nil if none?
 
         value
@@ -629,6 +659,8 @@ module Errgonomic
       private
 
       def presence_nudge(from, to)
+        return unless NUDGED.add?(from)
+
         warn "Errgonomic: `#{from}` on an Option is soft-deprecated; prefer `#{to}`."
       end
 
