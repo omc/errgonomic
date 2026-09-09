@@ -755,11 +755,6 @@ module Errgonomic
           Test it with none?, or supply a fallback with unwrap_or / unwrap_or_else.
         MSG
       end
-
-      public
-
-      # Rust's mutating combinators (insert, get_or_insert, take, replace)
-      # are deliberately omitted: an Option here is a value, not a slot.
     end
 
     # Represent a value

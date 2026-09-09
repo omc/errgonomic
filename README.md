@@ -140,6 +140,8 @@ Writers unwrap under that integration, which changes what a truthiness slip cost
 
 The remaining present-side helpers are soft-deprecated on Options in favor of the combinators. They unwrap, where on any other object they return the receiver: `Some(v).present_or_raise!(msg)`, `present_or(default)` and `present_or_else { }` all yield `v`, and `None` raises, substitutes, or computes. Each prints a one-line stderr nudge naming the combinator to use instead (`expect!`, `unwrap_or`, `unwrap_or_else`), once per process per method rather than once per call, so a hot path does not flood the log. The blank side (`blank_or*`) raises `UnwrappedAccessError` outright: an Option's blankness is its discriminant, so test it with `none?`.
 
+Four of Rust's methods are deliberately absent: `take`, `replace`, `insert` and `get_or_insert`. Every one of them writes through an `&mut Option`, and an Option here is a value rather than a slot: `Some(1)` is something you pass around and compare, not a cell whose contents you swap out from under another reference. Build the Option you want and assign it where the old one lived.
+
 Equality is between Options only: `Some(5) == Some(5)`, but `Some(5) == 5` and `None() == nil` are `false`. That is quiet, never an error, matching how every Ruby object compares across types. Rust rejects `Some(5) == 5` at compile time; Ruby cannot, so guard the idiom in review and tests: compare against a wrapped value (`opt == Some(5)`) or test the inner value (`opt.some_and? { |v| v == 5 }`). `Errgonomic.strict_equality = true` turns that guard into an error, which is what a test suite wants; see [Pedantic runtime checks](#pedantic-runtime-checks).
 
 ### Result
