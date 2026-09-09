@@ -11,6 +11,10 @@
 - `Option#presence` is supported rather than soft-deprecated: it is the Rails spelling of `unwrap_or(nil)` and no longer nudges. It stays discriminant-based, so `Some("").presence` is `""` where `"".presence` is `nil`
 - The nudge from the soft-deprecated `present_or`, `present_or_else` and `present_or_raise!` fires once per process per method rather than once per call, so a hot path no longer floods stderr, and it names `present_or_raise!` with its bang
 - [Dev, Test] `rake test:strict` passes `TESTOPTS` through to the run it spawns, so `--seed` works there as it does for `rake test`
+## [0.9.0] - 2026-09-08
+
+This release turns the ActiveRecord integration from a set of wrapped readers into a full set of boundaries, covering readers, writers, query binds, validation and serialization, with the behavior changes named in the bullets below.
+
 - `ActiveRecordOptional` installs its wrapped readers into a per-class module, so a model's own reader of the same name composes with the wrapper through `super` instead of one silently replacing the other
 - A wrapped reader lifts a value exactly one layer: an Option arriving from beneath the wrapper passes through instead of being wrapped a second time
 - `belongs_to` and `has_one` writers accept an Option: `Some(record)` assigns the record it wraps and `None()` clears the association, so a wrapped reader can be assigned straight onto another record
@@ -41,6 +45,8 @@
 - Ordering an Option or a Result against anything else raises `Errgonomic::TypeMismatchError`, naming both operands and the spellings that work (`some_and?` / `ok_and?`, `map`, `unwrap_or`). `<=>` used to answer `nil`, which `Comparable` turned into an `ArgumentError` blaming the Option for a comparison the bare value on the other side is what broke. Ordering between two Options or two Results is unchanged, `nil` included where their inner values do not compare
 - `Errgonomic::SerializeError` names the value that went unhandled: `cannot serialize an unwrapped Some("cell-a1b2")` rather than `cannot serialize an unwrapped Option`, with the value's `inspect` bounded to 60 characters so a large one does not bury the message. A payload built out of many values now says which one raised
 - [Dev, Test] - Doctests run against an in-memory ActiveRecord connection, so an `@example` under `lib/errgonomic/rails` specifies the integration the same way every other example specifies the core
+
+<!-- bullets from #69, #70, #71 move here on rebase -->
 
 ## [0.8.3] - 2026-08-12
 
