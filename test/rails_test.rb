@@ -1892,6 +1892,53 @@ class BugTest < Minitest::Test
     assert_predicate Note.new, :valid?
   end
 
+  # ActiveSupport's Object#try asks respond_to?, which an Option answers
+  # false for anything it does not define, so try on a wrapper is a silent
+  # nil unless the Option sends it to the value it holds.
+  def test_try_reaches_the_value_inside_a_some
+    book = Book.create!(title: 'The Dark Forest', isbn: ' 9780765377081 ')
+
+    assert_equal '9780765377081', book.isbn.try(:strip)
+  end
+
+  # Rails' try answers nil for a method the value does not have, and so does
+  # this one.
+  def test_try_answers_nil_for_a_method_the_value_does_not_have
+    book = Book.create!(title: 'The Dark Forest', isbn: '9780765377081')
+
+    assert_nil book.isbn.try(:no_such_method)
+  end
+
+  def test_try_on_a_none_is_nil
+    book = Book.create!(title: 'The Dark Forest')
+
+    assert_nil book.isbn.try(:strip)
+    assert_nil(book.isbn.try { |isbn| isbn.to_s.strip })
+  end
+
+  def test_try_yields_the_value_to_a_block
+    assert_equal 'THE DARK FOREST', Some('The Dark Forest').try(&:upcase)
+    assert_equal(6, Some(2).try { |pages| pages * 3 })
+  end
+
+  def test_try_forwards_arguments_and_keywords_to_the_value
+    greeter = Class.new do
+      def greeting(salutation, punctuation: '.')
+        "#{salutation}, reader#{punctuation}"
+      end
+    end.new
+
+    assert_equal 'Hello, reader!', Some(greeter).try(:greeting, 'Hello', punctuation: '!')
+  end
+
+  # try! is Rails' strict variant: absence is still nil, a missing method is
+  # not.
+  def test_try_bang_raises_where_try_answers_nil
+    assert_equal 'BOB', Some('bob').try!(:upcase)
+    assert_nil None().try!(:upcase)
+    assert_raises(NoMethodError) { Some('bob').try!(:no_such_method) }
+  end
+
   private
 
   def declare_serialize_none(mode, **scope)

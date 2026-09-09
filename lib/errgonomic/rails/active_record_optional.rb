@@ -355,6 +355,41 @@ module Errgonomic
       def to_option
         self
       end
+
+      # ActiveSupport's Object#try asks respond_to?, which an Option answers
+      # false for anything it does not define, so try on a wrapper would be a
+      # quiet nil for every method. Send it to the value instead: a Some
+      # tries what it holds, a None is absent and answers nil, and a method
+      # the value does not have is nil as it is for any other receiver.
+      #
+      # @example
+      #   Some("bob").try(:upcase) # => "BOB"
+      #   Some("bob").try(:no_such_method) # => nil
+      #   None().try(:upcase) # => nil
+      #   Some(2).try { |pages| pages * 3 } # => 6
+      #   None().try { |pages| pages * 3 } # => nil
+      def try(...)
+        return nil if none?
+
+        value.try(...)
+      end
+
+      # Rails' strict variant: absence is still nil, a method the value does
+      # not have raises.
+      #
+      # @example
+      #   Some("bob").try!(:upcase) # => "BOB"
+      #   None().try!(:upcase) # => nil
+      #   begin
+      #     Some("bob").try!(:no_such_method)
+      #   rescue NoMethodError => e
+      #     e.class
+      #   end # => NoMethodError
+      def try!(...)
+        return nil if none?
+
+        value.try!(...)
+      end
     end
   end
 end
