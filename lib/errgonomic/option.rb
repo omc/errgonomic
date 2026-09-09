@@ -191,9 +191,11 @@ module Errgonomic
       end
 
       # Options order like Rust's: None sorts before any Some, and Somes
-      # order by their inner values. Follows Ruby's <=> convention of
-      # returning nil for incomparable operands, whether the other object is
-      # not an Option or the inner values do not themselves compare.
+      # order by their inner values. Two Options whose inner values do not
+      # themselves compare follow Ruby's convention and answer nil. A
+      # non-Option operand raises instead: Comparable turns a nil here into
+      # an ArgumentError that names the Option as the operand at fault, where
+      # what went wrong is that a wrapper was ordered against a bare value.
       #
       # @example
       #   (Some(5) <=> Some(6)) # => -1
@@ -201,11 +203,20 @@ module Errgonomic
       #   (Some(5) <=> None()) # => 1
       #   (None() <=> None()) # => 0
       #   (Some(1) <=> Some("x")) # => nil
-      #   (Some(1) <=> 1) # => nil
       #   [Some(2), None(), Some(1)].sort # => [None(), Some(1), Some(2)]
       #   [Some(2), Some(1)].min # => Some(1)
+      #
+      # @example a bare value is not ordered against an Option
+      #   Some(5) <= 6 # => raise Errgonomic::TypeMismatchError, "cannot compare Some(5) with Integer; test the inner value (some_and? { |v| v <= other }) or reach for it (map, unwrap_or)"
+      #   Some(5).some_and? { |v| v <= 6 } # => true
+      #   Some(5).map { |v| v <= 6 } # => Some(true)
       def <=>(other)
-        return nil unless other.is_a?(Errgonomic::Option::Any)
+        unless other.is_a?(Errgonomic::Option::Any)
+          raise Errgonomic::TypeMismatchError,
+                "cannot compare #{inspect} with #{other.class}; test the inner value " \
+                '(some_and? { |v| v <= other }) or reach for it (map, unwrap_or)'
+        end
+
         return none? ? 0 : 1 if other.none?
         return -1 if none?
 
@@ -687,9 +698,14 @@ module Errgonomic
       # Object#to_json implementations.
       #
       # @example
-      #   None().to_json # => raise Errgonomic::SerializeError, "cannot serialize an unwrapped Option"
+      #   None().to_json # => raise Errgonomic::SerializeError, 'cannot serialize an unwrapped None'
+      #   begin
+      #     Some('a' * 100).to_json
+      #   rescue Errgonomic::SerializeError => e
+      #     e.message.end_with?('...')
+      #   end # => true
       def to_json(*_args)
-        raise Errgonomic::SerializeError, 'cannot serialize an unwrapped Option'
+        raise Errgonomic::SerializeError, serialize_refusal
       end
 
       # ActiveSupport's Hash#as_json and Array#as_json recurse through their
@@ -698,7 +714,7 @@ module Errgonomic
       # variables. Refuse there too, and the guard holds wherever an Option
       # travels.
       def as_json(*_args)
-        raise Errgonomic::SerializeError, 'cannot serialize an unwrapped Option'
+        raise Errgonomic::SerializeError, serialize_refusal
       end
 
       # pp uses its own object dump unless told otherwise; keep it consistent
@@ -756,6 +772,14 @@ module Errgonomic
       end
 
       private
+
+      # Name the value the caller failed to handle, bounded: an inspect of a
+      # record or a long payload would bury the message carrying it.
+      def serialize_refusal
+        rendered = inspect
+        rendered = "#{rendered[0, 57]}..." if rendered.length > 60
+        "cannot serialize an unwrapped #{rendered}"
+      end
 
       def presence_nudge(from, to)
         return unless NUDGED.add?(from)

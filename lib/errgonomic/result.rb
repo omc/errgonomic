@@ -15,19 +15,30 @@ module Errgonomic
       end
 
       # Results order like Rust's: Ok sorts before any Err, and same variants
-      # order by their inner values. Follows Ruby's <=> convention of
-      # returning nil for incomparable operands, whether the other object is
-      # not a Result or the inner values do not themselves compare.
+      # order by their inner values. Two Results whose inner values do not
+      # themselves compare follow Ruby's convention and answer nil. A
+      # non-Result operand raises instead: Comparable turns a nil here into an
+      # ArgumentError that names the Result as the operand at fault, where
+      # what went wrong is that a wrapper was ordered against a bare value.
       #
       # @example
       #   (Ok(1) <=> Ok(2)) # => -1
       #   (Ok(1) <=> Err(:a)) # => -1
       #   (Err(:a) <=> Ok(1)) # => 1
       #   (Err(:a) <=> Err(:b)) # => -1
-      #   (Ok(1) <=> 1) # => nil
       #   [Err(:a), Ok(2), Ok(1)].sort # => [Ok(1), Ok(2), Err(:a)]
+      #
+      # @example a bare value is not ordered against a Result
+      #   Ok(1) <= 2 # => raise Errgonomic::TypeMismatchError, "cannot compare Ok(1) with Integer; test the inner value (ok_and? { |v| v <= other }) or reach for it (map, unwrap_or)"
+      #   Ok(1).ok_and? { |v| v <= 2 } # => true
+      #   Ok(1).map { |v| v <= 2 } # => Ok(true)
       def <=>(other)
-        return nil unless other.is_a?(Errgonomic::Result::Any)
+        unless other.is_a?(Errgonomic::Result::Any)
+          raise Errgonomic::TypeMismatchError,
+                "cannot compare #{inspect} with #{other.class}; test the inner value " \
+                '(ok_and? { |v| v <= other }) or reach for it (map, unwrap_or)'
+        end
+
         return ok? ? -1 : 1 if self.class != other.class
 
         value <=> other.value

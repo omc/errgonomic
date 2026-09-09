@@ -33,15 +33,20 @@ module Errgonomic
     #    asks whether it amounts to anything: Some("") passes some: true and
     #    fails presence. It lifts what it is handed, so it asks the same
     #    question of any model, converted or not.
-    # 5. Where ActiveRecord's own machinery reads a value raw, it gets one.
+    # 5. Where the framework's own machinery reads a value raw, it gets one.
     #    Validation unwraps at read_attribute_for_validation, the seam every
-    #    EachValidator fetches an attribute through, and serialization at
+    #    EachValidator fetches an attribute through; serialization at
     #    read_attribute_for_serialization, the seam every attribute in a
-    #    payload is fetched through, so a standard validator weighs the value
-    #    and a payload carries it rather than the wrapper. A singular
-    #    association with nested attributes goes further and keeps its plain
-    #    reader: nested attributes are assigned through the reader, and
-    #    ActiveRecord asks whatever it finds there whether it is a new record.
+    #    payload is fetched through; and a form helper at ActionView's tag
+    #    value, the seam every field reads its record through. So a standard
+    #    validator weighs the value, a payload carries it and a form renders
+    #    it, rather than the wrapper. A singular association with nested
+    #    attributes goes further and keeps its plain reader: nested attributes
+    #    are assigned through the reader, and ActiveRecord asks whatever it
+    #    finds there whether it is a new record. So does a reader a framework
+    #    macro declares and then reads for itself: the associations behind
+    #    has_rich_text and has_one_attached, and the digest column
+    #    has_secure_password hands to BCrypt.
     #
     # errgonomic_optional_except and errgonomic_serialize_none are not on the
     # list: they are configuration, an escape hatch for whatever conflict
@@ -49,6 +54,17 @@ module Errgonomic
     # semantic exceptions.
     module ActiveRecordOptional
       extend ActiveSupport::Concern
+
+      # The singular associations ActionText and ActiveStorage declare for a
+      # model and then read through code of their own. Recognized by the name
+      # a reflection was given rather than by the class, so nothing has to be
+      # loaded for a model to be asked.
+      FRAMEWORK_ASSOCIATION_CLASSES = %w[
+        ActionText::RichText
+        ActionText::EncryptedRichText
+        ActiveStorage::Attachment
+        ActiveStorage::Blob
+      ].freeze
 
       included do
         errgonomic_optional_readers
@@ -98,6 +114,18 @@ module Errgonomic
         errgonomic_omit_absent_keys(hash)
       end
 
+      # YARD does not see through a concern's class_methods block, so the
+      # method it documents is declared rather than read.
+      #
+      # @!method errgonomic_optionals
+      #   @!scope class
+      #   The readers a model wrapped, which is how a conversion is checked.
+      #   @example a reader the framework reads for itself is left alone
+      #     Dispatch.errgonomic_optionals.include?('rich_text_body') # => false
+      #     Dispatch.errgonomic_optionals.include?('title') # => true
+      #   @example a subclass reports the readers it inherited
+      #     Briefing.errgonomic_optionals # => ['title', 'summary']
+      #     Briefing.errgonomic_optional_names # => []
       class_methods do
         # Wrapped readers live in a module of their own, the way ActiveRecord
         # keeps its attribute methods, so a model's own def of the same name
@@ -123,10 +151,21 @@ module Errgonomic
 
         # What a model wrapped is the signal that a conversion did what it
         # meant to, and the columns are not wrapped until the schema loads, so
-        # asking loads it.
+        # asking loads it. A subclass responds to every reader an ancestor
+        # wrapped, so the report names those too.
         def errgonomic_optionals
           load_schema
-          errgonomic_optional_names
+          errgonomic_inherited_optional_names | errgonomic_optional_names
+        end
+
+        # Wrapping walks the chain from the top down, so loading this class's
+        # schema has already wrapped an ancestor's columns and reading the
+        # names is enough. An abstract ancestor is never asked for a table it
+        # has not got.
+        def errgonomic_inherited_optional_names
+          return [] unless superclass.respond_to?(:errgonomic_optional_names)
+
+          superclass.errgonomic_inherited_optional_names | superclass.errgonomic_optional_names
         end
 
         # The set as it stands, for the wrapping itself: reaching for the
@@ -148,7 +187,36 @@ module Errgonomic
 
           inherited |
             Array(try(:errgonomic_optional_exceptions)).map(&:to_s) |
-            errgonomic_nested_attribute_associations
+            errgonomic_nested_attribute_associations |
+            errgonomic_framework_readers
+        end
+
+        # Readers the framework reads for itself, whatever the model asked
+        # for. ActionText and ActiveStorage reach their records through the
+        # associations their macros declare, and has_secure_password hands
+        # the digest column to BCrypt, none of them through anything that has
+        # heard of an Option: a wrapper there breaks assignment, attachment
+        # and authentication alike.
+        def errgonomic_framework_readers
+          errgonomic_framework_associations + errgonomic_secure_password_digests
+        end
+
+        def errgonomic_framework_associations
+          reflect_on_all_associations(:has_one)
+            .select { |r| FRAMEWORK_ASSOCIATION_CLASSES.include?(r.class_name) }
+            .map { |r| r.name.to_s }
+        end
+
+        # has_secure_password includes a module of its own per attribute, and
+        # the authenticate_ reader in it names the attribute whose digest is
+        # read. Asking the macro what it declared costs no schema, which a
+        # column scan would load while a class body is still running.
+        def errgonomic_secure_password_digests
+          return [] unless defined?(ActiveModel::SecurePassword::InstanceMethodsOnActivation)
+
+          ancestors.grep(ActiveModel::SecurePassword::InstanceMethodsOnActivation)
+                   .flat_map { |mod| mod.instance_methods(false).grep(/\Aauthenticate_/) }
+                   .map { |name| "#{name.to_s.delete_prefix('authenticate_')}_digest" }
         end
 
         # A wrapped reader whose absent value the declaration in force asks
@@ -220,6 +288,16 @@ module Errgonomic
         # absence is a validation failure rather than a value to handle.
         def has_one(name, scope = nil, **options)
           super.tap { errgonomic_wrap_optional(name) unless options[:required] }
+        end
+
+        # A digest column is ordinarily wrapped after this declaration, and
+        # the exclusion is enough there. A model whose schema has already
+        # loaded has to be handed its reader back. has_rich_text and
+        # has_one_attached need no such override: they declare their
+        # associations through has_one, which reads the exclusion after the
+        # reflection exists.
+        def has_secure_password(attribute = :password, **options)
+          super.tap { errgonomic_unwrap_optionals("#{attribute}_digest") }
         end
 
         # Nested attributes are assigned through the public reader, and
@@ -652,3 +730,28 @@ module Errgonomic
 end
 
 ActiveModel::AttributeRegistration::ClassMethods.prepend(Errgonomic::Rails::ActiveModelAttributeDefault)
+
+module Errgonomic
+  module Rails
+    # A form helper reads its value off the record through the public reader
+    # whenever the value did not come from user input, which is every record
+    # an edit form loads from the database. Each tag then weighs what it finds
+    # its own way: a check box asks it for to_i, a datetime field for
+    # strftime, and a text field renders it into the markup. Unwrapping at the
+    # one seam they all read through is what lets a converted model render the
+    # form an unconverted one renders.
+    module ActionViewTagValue
+      private
+
+      def value
+        Errgonomic::Rails.unwrap_option(super)
+      end
+    end
+  end
+end
+
+# ActionView may be loaded before this file, after it, or not at all, and the
+# load hook answers for all three.
+ActiveSupport.on_load(:action_view) do
+  ActionView::Helpers::Tags::Base.prepend(Errgonomic::Rails::ActionViewTagValue)
+end
