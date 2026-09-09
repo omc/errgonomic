@@ -698,9 +698,14 @@ module Errgonomic
       # Object#to_json implementations.
       #
       # @example
-      #   None().to_json # => raise Errgonomic::SerializeError, "cannot serialize an unwrapped Option"
+      #   None().to_json # => raise Errgonomic::SerializeError, 'cannot serialize an unwrapped None'
+      #   begin
+      #     Some('a' * 100).to_json
+      #   rescue Errgonomic::SerializeError => e
+      #     e.message.end_with?('...')
+      #   end # => true
       def to_json(*_args)
-        raise Errgonomic::SerializeError, 'cannot serialize an unwrapped Option'
+        raise Errgonomic::SerializeError, serialize_refusal
       end
 
       # ActiveSupport's Hash#as_json and Array#as_json recurse through their
@@ -709,7 +714,7 @@ module Errgonomic
       # variables. Refuse there too, and the guard holds wherever an Option
       # travels.
       def as_json(*_args)
-        raise Errgonomic::SerializeError, 'cannot serialize an unwrapped Option'
+        raise Errgonomic::SerializeError, serialize_refusal
       end
 
       # pp uses its own object dump unless told otherwise; keep it consistent
@@ -767,6 +772,14 @@ module Errgonomic
       end
 
       private
+
+      # Name the value the caller failed to handle, bounded: an inspect of a
+      # record or a long payload would bury the message carrying it.
+      def serialize_refusal
+        rendered = inspect
+        rendered = "#{rendered[0, 57]}..." if rendered.length > 60
+        "cannot serialize an unwrapped #{rendered}"
+      end
 
       def presence_nudge(from, to)
         return unless NUDGED.add?(from)
