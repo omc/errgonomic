@@ -1,5 +1,8 @@
 # frozen_string_literal: true
 
+require 'set'
+require 'stringio'
+
 module Errgonomic
   module Option
     # The base class for all options. Some and None are subclasses.
@@ -19,6 +22,11 @@ module Errgonomic
         is_some_and: :some_and?,
         is_none_or: :none_or?
       }.freeze
+
+      # Names already nudged about. A soft deprecation is a message to a
+      # developer, and one per process says it; one per call turns a hot
+      # path into a stderr flood.
+      NUDGED = Set.new
 
       # An Option deliberately forwards nothing to its inner value, so a miss
       # here is almost always someone treating the container as its contents.
@@ -76,7 +84,44 @@ module Errgonomic
       #   None() == None() # => true
       #   Some(1) == 1 # => false
       #   None() == nil # => false
+      #
+      # @example strict equality makes a cross-type comparison an error
+      #   Errgonomic.with_strict_equality do
+      #     begin
+      #       Some(5) == 5
+      #     rescue Errgonomic::TypeMismatchError => e
+      #       e.class
+      #     end
+      #   end # => Errgonomic::TypeMismatchError
+      #   Errgonomic.with_strict_equality do
+      #     begin
+      #       Some(5) != 5
+      #     rescue Errgonomic::TypeMismatchError => e
+      #       e.message.include?("!=")
+      #     end
+      #   end # => true
+      #   Errgonomic.with_strict_equality { Some(5) == Some(5) } # => true
+      #   Errgonomic.with_strict_equality { Some(5) == None() } # => false
+      #
+      # @example a Result is another container, not another Option
+      #   Errgonomic.with_strict_equality do
+      #     begin
+      #       Some(1) == Ok(1)
+      #     rescue Errgonomic::TypeMismatchError => e
+      #       e.message.include?("different containers")
+      #     end
+      #   end # => true
+      #
+      # @example nil is another type, and absence here is the discriminant
+      #   Errgonomic.with_strict_equality do
+      #     begin
+      #       None() == nil
+      #     rescue Errgonomic::TypeMismatchError => e
+      #       e.message.include?("none?")
+      #     end
+      #   end # => true
       def ==(other)
+        strict_equality!(other, '==')
         return false if self.class != other.class
         return true if none?
 
@@ -94,7 +139,25 @@ module Errgonomic
       #   None().eql?(None()) # => true
       #   { Some(5) => 1 }[Some(5)] # => 1
       #   [Some(1), Some(1), None(), None()].uniq # => [Some(1), None()]
+      #
+      # @example strict equality reaches eql?, and leaves hash alone
+      #   Errgonomic.with_strict_equality do
+      #     begin
+      #       Some(5).eql?(5)
+      #     rescue Errgonomic::TypeMismatchError => e
+      #       e.class
+      #     end
+      #   end # => Errgonomic::TypeMismatchError
+      #   Errgonomic.with_strict_equality { Some(5).hash == Some(5).hash } # => true
+      # Ruby derives != from ==, so a strict-equality message would name the
+      # operator the caller did not write.
+      def !=(other)
+        strict_equality!(other, '!=')
+        super
+      end
+
       def eql?(other)
+        strict_equality!(other, 'eql?')
         return false if self.class != other.class
         return true if none?
 
@@ -201,13 +264,15 @@ module Errgonomic
       # The presence helpers on Object keep their receiver; on an Option that
       # would hand back the wrapper where the caller asked for a value. Here
       # the present side unwraps instead, so a name that reads like an
-      # accessor behaves like one. The whole family is soft-deprecated on
-      # Options in favor of the combinators, so each call nudges via stderr,
-      # and the blank side, which has no working call sites to preserve,
-      # teaches rather than guesses at semantics.
+      # accessor behaves like one. The +_or+ spellings are soft-deprecated on
+      # Options in favor of the combinators and nudge via stderr; `presence`
+      # is the Rails idiom for unwrap_or(nil) and stays. The blank side, which
+      # has no working call sites to preserve, teaches rather than guesses at
+      # semantics.
 
       # Returns the inner value of a Some, and raises on a None. Presence
-      # follows the discriminant, so Some(nil) yields nil.
+      # follows the discriminant, so Some(nil) yields nil. A block is called
+      # only on the None branch, as it is for expect!.
       #
       # @param message [String] The error message to raise on a None.
       # @return [Object] The inner value of a Some.
@@ -216,9 +281,10 @@ module Errgonomic
       #   Some("secret").present_or_raise!("no secret") # => "secret"
       #   Some(nil).present_or_raise!("no secret") # => nil
       #   None().present_or_raise!("no secret") # => raise Errgonomic::NotPresentError, "no secret"
-      def present_or_raise!(message)
-        presence_nudge('present_or_raise', 'expect!')
-        raise Errgonomic::NotPresentError, message if none?
+      #   None().present_or_raise! { "no secret for #{7}" } # => raise Errgonomic::NotPresentError, "no secret for 7"
+      def present_or_raise!(message = nil, &block)
+        presence_nudge('present_or_raise!', 'expect!')
+        raise Errgonomic::NotPresentError, block ? block.call : message if none?
 
         value
       end
@@ -235,6 +301,18 @@ module Errgonomic
       # @example
       #   Some("secret").present_or("fallback") # => "secret"
       #   None().present_or("fallback") # => "fallback"
+      #
+      # @example the nudge fires once per process, so a hot path stays quiet
+      #   Some(1).present_or(2)
+      #   nudges = StringIO.new
+      #   original = $stderr
+      #   begin
+      #     $stderr = nudges
+      #     Some(1).present_or(2)
+      #   ensure
+      #     $stderr = original
+      #   end
+      #   nudges.string # => ""
       def present_or(default)
         presence_nudge('present_or', 'unwrap_or')
         return default if none?
@@ -260,15 +338,30 @@ module Errgonomic
 
       # Returns the inner value of a Some, and nil on a None, so the Rails
       # +presence || default+ idiom reaches the value rather than the wrapper.
+      # Presence follows the discriminant, so a blank inner value is still a
+      # value: Some("").presence is "", where Object#presence answers nil.
       #
       # @return [Object, nil] The inner value of a Some, otherwise nil.
       #
       # @example
       #   Some("secret").presence # => "secret"
+      #   Some("").presence # => ""
       #   None().presence # => nil
       #   None().presence || "fallback" # => "fallback"
+      #
+      # @example the Rails spelling of unwrap_or(nil), and no nudge with it
+      #   nudges = StringIO.new
+      #   original = $stderr
+      #   begin
+      #     $stderr = nudges
+      #     captured = Some("").presence
+      #     None().presence
+      #   ensure
+      #     $stderr = original
+      #   end
+      #   captured # => ""
+      #   nudges.string # => ""
       def presence
-        presence_nudge('presence', 'unwrap_or(nil)')
         return nil if none?
 
         value
@@ -316,6 +409,30 @@ module Errgonomic
         [value]
       end
 
+      # Yields the inner value once for a Some and not at all for a None, so
+      # an Option reads as the zero-or-one collection it is, and answers an
+      # Enumerator without a block. Option does not include Enumerable: its
+      # own filter and first answer Options, where Enumerable's answer plain
+      # values, and one name cannot mean both.
+      #
+      # @example
+      #   seen = []
+      #   Some(1).each { |x| seen << x } # => Some(1)
+      #   seen # => [1]
+      #   None().each { |x| seen << x } # => None()
+      #   seen # => [1]
+      #   Some(1).each.to_a # => [1]
+      #   None().each.to_a # => []
+      #   Some(2).each.map { |x| x * 3 } # => [6]
+      #   Some(1).each.size # => 1
+      #   None().each.size # => 0
+      def each(&block)
+        return to_enum(:each) { some? ? 1 : 0 } unless block
+
+        block.call(value) if some?
+        self
+      end
+
       # returns the inner value if present, else raises an error
       # @example
       #   Some(1).unwrap! # => 1
@@ -326,13 +443,17 @@ module Errgonomic
         value
       end
 
-      # returns the inner value if pressent, else raises an error with the given
-      # message
+      # Returns the inner value of a Some, else raises with the given message.
+      # A block is called only on the None branch, so a message that
+      # interpolates costs nothing on the path that succeeds.
+      #
       # @example
       #   Some(1).expect!("msg") # => 1
       #   None().expect!("here's why this failed") # => raise Errgonomic::ExpectError, "here's why this failed"
-      def expect!(msg)
-        raise Errgonomic::ExpectError, msg if none?
+      #   Some(1).expect! { "built only where it is raised" } # => 1
+      #   None().expect! { "no tier for #{7}" } # => raise Errgonomic::ExpectError, "no tier for 7"
+      def expect!(msg = nil, &block)
+        raise Errgonomic::ExpectError, block ? block.call : msg if none?
 
         value
       end
@@ -379,46 +500,49 @@ module Errgonomic
       end
 
       # Maps the Option to another Option by applying a function to the
-      # contained value (if Some) or returns None. Raises a pedantic exception
-      # if the return value of the block is not an Option.
+      # contained value (if Some) or returns None. Whatever the block returns
+      # is wrapped, as in Rust: a block that returns an Option gives
+      # Some(Some(x)). and_then is the spelling for a block that returns an
+      # Option.
       #
       # @example
       #   Some(1).map { |x| x + 1 } # => Some(2)
       #   None().map { |x| x + 1 } # => None()
+      #   Some(1).map { |x| Some(x + 1) } # => Some(Some(2))
+      #   Some(1).and_then { |x| Some(x + 1) } # => Some(2)
       def map(&block)
         return self if none?
 
         Some(block.call(value))
       end
 
-      # Returns the provided default (if none), or applies a function to the
-      # contained value (if some). If you want lazy evaluation for the provided
-      # value, use +map_or_else+.
+      # Returns the provided default (if none), or the block applied to the
+      # contained value (if some). Both come back bare, as Rust's map_or
+      # gives: this is the exit from the Option, where map stays inside it.
+      # Use +map_or_else+ when the default is expensive to build.
       #
       # @example
-      #   None().map_or(1) { 100 } # => Some(1)
-      #   Some(1).map_or(100) { |x| x + 1 } # => Some(2)
-      #   Some("foo").map_or(0) { |str| str.length } # => Some(3)
+      #   None().map_or(1) { 100 } # => 1
+      #   Some(1).map_or(100) { |x| x + 1 } # => 2
+      #   Some("foo").map_or(0) { |str| str.length } # => 3
+      #   Some(2).map_or(0) { |x| x * 2 } # => 4
       def map_or(default, &block)
-        return Some(default) if none?
+        return default if none?
 
-        Some(block.call(value))
+        block.call(value)
       end
 
       # Computes a default from the given Proc if None, or applies the block to
-      # the contained value (if Some).
+      # the contained value (if Some). Both come back bare, as map_or's do.
       #
       # @example
-      #   None().map_or_else(-> { :foo }) { :bar } # => Some(:foo)
-      #   Some("str").map_or_else(-> { 100 }) { |str| str.length } # => Some(3)
-      #   None().map_or_else( -> { nil }) { |str| str.length } # => None()
+      #   None().map_or_else(-> { :foo }) { :bar } # => :foo
+      #   Some("str").map_or_else(-> { 100 }) { |str| str.length } # => 3
+      #   None().map_or_else(-> { nil }) { |str| str.length } # => nil
       def map_or_else(proc, &block)
-        if none?
-          val = proc.call
-          return val ? Some(val) : None()
-        end
+        return proc.call if none?
 
-        Some(block.call(value))
+        block.call(value)
       end
 
       # convert the option into a result where Some is Ok and None is Err
@@ -543,13 +667,18 @@ module Errgonomic
         Some(other)
       end
 
-      # Refuse to serialize an unwrapped Option as a String. Options must be
-      # correctly handled to access their inner value.
+      # Render as inspect does. Rust gives Option a Debug and no Display, so
+      # refusing was faithful, but a to_s that raises replaces the real
+      # exception while a rescue builds its log line, and the rendered form
+      # says plainly that a wrapper arrived where a value was meant.
       #
       # @example
-      #   None().to_s # => raise Errgonomic::SerializeError, "cannot serialize an unwrapped Option"
+      #   Some(1).to_s # => "Some(1)"
+      #   Some("x").to_s # => "Some(\"x\")"
+      #   None().to_s # => "None"
+      #   "value: #{Some(1)}" # => "value: Some(1)"
       def to_s
-        raise Errgonomic::SerializeError, 'cannot serialize an unwrapped Option'
+        inspect
       end
 
       # Refuse to serialize an unwrapped Option as JSON. Not only should we
@@ -629,7 +758,31 @@ module Errgonomic
       private
 
       def presence_nudge(from, to)
+        return unless NUDGED.add?(from)
+
         warn "Errgonomic: `#{from}` on an Option is soft-deprecated; prefer `#{to}`."
+      end
+
+      def strict_equality!(other, operator)
+        return unless Errgonomic.strict_equality?
+        return if other.is_a?(Errgonomic::Option::Any)
+
+        raise Errgonomic::TypeMismatchError,
+              "#{self.class} #{operator} #{other.class}, which strict equality refuses.\n" \
+              "#{strict_equality_remedy(other)}"
+      end
+
+      def strict_equality_remedy(other)
+        case other
+        when Errgonomic::Result::Any
+          'An Option and a Result are different containers, and neither is the other. ' \
+            'Unwrap the one you meant (opt.unwrap_or(nil) == res.unwrap_or(nil)).'
+        when nil
+          'Absence here is the discriminant: ask none?, or nil? under the Rails integration.'
+        else
+          "Compare Options (opt == Some(#{other.inspect})), test the inner value " \
+            "(opt.some_and? { |v| v == #{other.inspect} }), or unwrap_or a fallback first."
+        end
       end
 
       def raise_blank_side_teaching(name)
@@ -638,11 +791,6 @@ module Errgonomic
           Test it with none?, or supply a fallback with unwrap_or / unwrap_or_else.
         MSG
       end
-
-      public
-
-      # Rust's mutating combinators (insert, get_or_insert, take, replace)
-      # are deliberately omitted: an Option here is a value, not a slot.
     end
 
     # Represent a value

@@ -1346,8 +1346,8 @@ class BugTest < Minitest::Test
     assert note.reload.meta.none?
   end
 
-  # A numeric writer reaches its value without Option#presence, which is
-  # soft-deprecated and nudges on stderr on every call.
+  # A numeric writer reaches its value without the soft-deprecated presence
+  # helpers, which nudge on stderr.
   def test_a_numeric_writer_takes_an_option_without_a_deprecation_nudge
     note = nil
     nudges = capture_stderr do
@@ -1890,6 +1890,65 @@ class BugTest < Minitest::Test
   # all of them.
   def test_validating_a_converted_record_with_no_validations_does_not_raise
     assert_predicate Note.new, :valid?
+  end
+
+  # The nudge names the method the caller wrote, bang and all. It fires once
+  # per process, so this asks for it back before listening.
+  def test_the_present_or_raise_nudge_names_the_method_with_its_bang
+    Errgonomic::Option::Any::NUDGED.delete('present_or_raise!')
+
+    nudges = capture_stderr do
+      assert_raises(Errgonomic::NotPresentError) { None().present_or_raise!('no bio') }
+    end
+
+    assert_includes nudges, '`present_or_raise!`'
+  end
+
+  # ActiveSupport's Object#try asks respond_to?, which an Option answers
+  # false for anything it does not define, so try on a wrapper is a silent
+  # nil unless the Option sends it to the value it holds.
+  def test_try_reaches_the_value_inside_a_some
+    book = Book.create!(title: 'The Dark Forest', isbn: ' 9780765377081 ')
+
+    assert_equal '9780765377081', book.isbn.try(:strip)
+  end
+
+  # Rails' try answers nil for a method the value does not have, and so does
+  # this one.
+  def test_try_answers_nil_for_a_method_the_value_does_not_have
+    book = Book.create!(title: 'The Dark Forest', isbn: '9780765377081')
+
+    assert_nil book.isbn.try(:no_such_method)
+  end
+
+  def test_try_on_a_none_is_nil
+    book = Book.create!(title: 'The Dark Forest')
+
+    assert_nil book.isbn.try(:strip)
+    assert_nil(book.isbn.try { |isbn| isbn.to_s.strip })
+  end
+
+  def test_try_yields_the_value_to_a_block
+    assert_equal 'THE DARK FOREST', Some('The Dark Forest').try(&:upcase)
+    assert_equal(6, Some(2).try { |pages| pages * 3 })
+  end
+
+  def test_try_forwards_arguments_and_keywords_to_the_value
+    greeter = Class.new do
+      def greeting(salutation, punctuation: '.')
+        "#{salutation}, reader#{punctuation}"
+      end
+    end.new
+
+    assert_equal 'Hello, reader!', Some(greeter).try(:greeting, 'Hello', punctuation: '!')
+  end
+
+  # try! is Rails' strict variant: absence is still nil, a missing method is
+  # not.
+  def test_try_bang_raises_where_try_answers_nil
+    assert_equal 'BOB', Some('bob').try!(:upcase)
+    assert_nil None().try!(:upcase)
+    assert_raises(NoMethodError) { Some('bob').try!(:no_such_method) }
   end
 
   private

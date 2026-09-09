@@ -86,6 +86,33 @@ module Errgonomic
     @give_me_ambiguous_downstream_errors = original_value
   end
 
+  # Cross-type equality is quiet by default, as it is for every Ruby object.
+  # Strict equality turns it into an error instead, for a test suite or CI:
+  # `Some(5) == 5` is the comparison Rust rejects at compile time, and it is
+  # silently false here otherwise.
+  #
+  # @example
+  #   Errgonomic.strict_equality? # => false
+  #   Errgonomic.with_strict_equality { Errgonomic.strict_equality? } # => true
+  #   Errgonomic.strict_equality? # => false
+  def self.strict_equality?
+    !!@strict_equality
+  end
+
+  class << self
+    # Turn cross-type equality into an error for the rest of the process.
+    attr_writer :strict_equality
+  end
+
+  # Turn cross-type equality into an error for the duration of the block.
+  def self.with_strict_equality
+    original_value = @strict_equality
+    @strict_equality = true
+    yield
+  ensure
+    @strict_equality = original_value
+  end
+
   # Lenient inner value comparison means the inner value of a Some or Ok can be
   # compared to some other non-Result or non-Option value.
   def self.lenient_inner_value_comparison?

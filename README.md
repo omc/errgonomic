@@ -95,12 +95,21 @@ Some(1).expect!("must be set")   # => 1
 
 Some(1).map { |x| x + 1 }        # => Some(2)
 Some(2).and_then { |x| Some(x + 1) } # => Some(3)
+Some(2).map_or(0) { |x| x * 2 }  # => 4, a bare value
+None().map_or(0) { |x| x * 2 }   # => 0
 None().or(Some(1))               # => Some(1)
 Some(:left).xor(None())          # => Some(:left)
 Some(1).zip(Some(2))             # => Some([1, 2])
 Some(1).ok_or("nope")            # => Ok(1)
 None().ok_or("nope")             # => Err("nope")
+
+Some(1).each { |x| log(x) }      # yields once; None() yields nothing
+Some(1).each.to_a                # => [1]
 ```
+
+`each` is the whole of the collection surface. An Option does not include `Enumerable`, because `filter` and `first` already answer Options here and Enumerable's answer plain values; `opt.each` hands you an Enumerator when you want the rest of them.
+
+`map` wraps whatever the block returns, as Rust's does, so a block that itself returns an Option gives `Some(Some(x))`. `and_then` is the spelling for that block.
 
 Options support pattern matching:
 
@@ -113,7 +122,11 @@ in Errgonomic::Option::None
 end
 ```
 
-An unhandled Option refuses to leak into your output: `to_s`, `to_json`, and `as_json` raise `Errgonomic::SerializeError`, so you handle the inner value deliberately rather than shipping `#<Errgonomic::Option::Some...>` to a user. The refusal covers `as_json` because Hash and Array serialization recurses through that method, and an Option nested in a payload would otherwise serialize as `{"value": ...}`. A converted ActiveRecord model is the one exception, at the model boundary: it unwraps each attribute as it serializes, so a record's own `as_json` says what an unconverted record's says. See [Rails integration](#rails-integration).
+An unhandled Option refuses to leak into your output: `to_json` and `as_json` raise `Errgonomic::SerializeError`, so you handle the inner value deliberately rather than shipping `#<Errgonomic::Option::Some...>` to a user. The refusal covers `as_json` because Hash and Array serialization recurses through that method, and an Option nested in a payload would otherwise serialize as `{"value": ...}`. A converted ActiveRecord model is the one exception, at the model boundary: it unwraps each attribute as it serializes, so a record's own `as_json` says what an unconverted record's says. See [Rails integration](#rails-integration).
+
+`to_s` renders rather than refusing: `Some(1).to_s` is `"Some(1)"` and `None().to_s` is `"None"`, matching `inspect`, and the same holds for `Ok` and `Err`. Rust gives `Option` a `Debug` and no `Display`, so raising was the faithful reading, but a `to_s` that raises replaces the real exception while a `rescue` builds its log line, which is the worst possible place to be strict. The rendered form is unambiguous: a `Some(1)` in a log says a wrapper arrived where a value was meant.
+
+`expect!` also takes a block, on an Option and a Result alike, so a message that interpolates is built only on the branch that raises: `tier.expect! { "no tier for #{account.id}" }`. `present_or_raise!` takes one on the same terms. The positional form is unchanged.
 
 `unwrap!` and `expect!` are for tests and consoles, not application code: they raise on `None`, which is exactly the ambiguous failure the type exists to prevent. Application code should always have a combinator or pattern match that handles the `None` branch explicitly; if none fits, that is a gap worth an issue rather than a reason to unwrap.
 
@@ -123,9 +136,13 @@ Truthiness is the Rails reflex that breaks. An Option is an object, so `None()` 
 
 Writers unwrap under that integration, which changes what a truthiness slip costs rather than removing it. `self.isbn = isbn || 'unassigned'` no longer leaks a wrapper into the database; it silently persists whatever `isbn` held, `nil` included, because a `None` is truthy and the fallback is never reached. The write succeeds and nothing raises. `unwrap_or('unassigned')` is the spelling that means it.
 
-The presence helpers are soft-deprecated on Options in favor of the combinators. The present side unwraps, where on any other object it returns the receiver — `Some(v).present_or_raise!(msg)`, `present_or(default)`, `present_or_else { }`, and `presence` all yield `v`, and `None` raises, substitutes, or answers `nil` — and each call prints a one-line stderr nudge naming the combinator to use instead (`expect!`, `unwrap_or`, `unwrap_or_else`, `unwrap_or(nil)`). The blank side (`blank_or*`) raises `UnwrappedAccessError` outright: an Option's blankness is its discriminant, so test it with `none?`.
+`presence` is the Rails spelling of `unwrap_or(nil)`, and it is supported: `Some(x).presence` is `x` and `None().presence` is `nil`, so `isbn.presence || 'unassigned'` reaches the value rather than the wrapper. It follows the discriminant, as every presence question on an Option does, so `Some("").presence` is `""` where `"".presence` on any other object is `nil`. An Option's presence is whether it holds a value, not what that value amounts to; unwrap first (`isbn.unwrap_or("").presence`) to ask the inner value's own presence.
 
-Equality is between Options only: `Some(5) == Some(5)`, but `Some(5) == 5` and `None() == nil` are `false`. That is quiet, never an error, matching how every Ruby object compares across types. Rust rejects `Some(5) == 5` at compile time; Ruby cannot, so guard the idiom in review and tests: compare against a wrapped value (`opt == Some(5)`) or test the inner value (`opt.some_and? { |v| v == 5 }`).
+The remaining present-side helpers are soft-deprecated on Options in favor of the combinators. They unwrap, where on any other object they return the receiver: `Some(v).present_or_raise!(msg)`, `present_or(default)` and `present_or_else { }` all yield `v`, and `None` raises, substitutes, or computes. Each prints a one-line stderr nudge naming the combinator to use instead (`expect!`, `unwrap_or`, `unwrap_or_else`), once per process per method rather than once per call, so a hot path does not flood the log. The blank side (`blank_or*`) raises `UnwrappedAccessError` outright: an Option's blankness is its discriminant, so test it with `none?`.
+
+Four of Rust's methods are deliberately absent: `take`, `replace`, `insert` and `get_or_insert`. Every one of them writes through an `&mut Option`, and an Option here is a value rather than a slot: `Some(1)` is something you pass around and compare, not a cell whose contents you swap out from under another reference. Build the Option you want and assign it where the old one lived.
+
+Equality is between Options only: `Some(5) == Some(5)`, but `Some(5) == 5` and `None() == nil` are `false`. That is quiet, never an error, matching how every Ruby object compares across types. Rust rejects `Some(5) == 5` at compile time; Ruby cannot, so guard the idiom in review and tests: compare against a wrapped value (`opt == Some(5)`) or test the inner value (`opt.some_and? { |v| v == 5 }`). `Errgonomic.strict_equality = true` turns that guard into an error, which is what a test suite wants; see [Pedantic runtime checks](#pedantic-runtime-checks).
 
 ### Result
 
@@ -158,7 +175,7 @@ in Errgonomic::Result::Err, Exception => e
 end
 ```
 
-Like Options, unwrapped Results refuse `to_s`, `to_json`, and `as_json`. And `Object#result?` / `Object#assert_result!` help enforce at runtime that a value is a Result.
+Like Options, unwrapped Results refuse `to_json` and `as_json`, and render `to_s` as `inspect` does. And `Object#result?` / `Object#assert_result!` help enforce at runtime that a value is a Result.
 
 ### Optional collections
 
@@ -229,6 +246,36 @@ Errgonomic.with_ambiguous_downstream_errors do
   # anything goes in here
 end
 ```
+
+Cross-type equality is the other pedantic check, and it is off by default because a quiet `false` is what every Ruby object answers. Turn it on and a comparison between a wrapper and a value that is not one raises `Errgonomic::TypeMismatchError`, naming both classes and the spelling to reach for:
+
+```ruby
+Errgonomic.strict_equality = true
+
+Some(5) == 5        # => raises Errgonomic::TypeMismatchError
+Some(5) != 5        # => raises
+Some(5).eql?(5)     # => raises
+None() == nil       # => raises, pointing at none?
+Ok(1) == 1          # => raises
+Some(1) == Ok(1)    # => raises: an Option and a Result are different containers
+Some(5) == Some(5)  # => true, as always
+
+1 == Some(1)        # => raises, through Integer's coercion fallback
+nil == None()       # => false, quietly
+"a" == Some("a")    # => false, quietly
+```
+
+A Result is cross-type for an Option and an Option is cross-type for a Result: they are different containers, neither is the other, and the message says to unwrap whichever one you meant. Two Options, or two Results, compare as they always did, and `hash` is untouched, so an Option stays usable as a Hash key with it on.
+
+Strictness fires when the wrapper is the receiver, and also when the left operand hands the comparison over: `1 == Some(1)` raises because `Integer#==` falls back to asking the right-hand side. `nil == None()` and `"a" == Some("a")` stay quietly false, because `NilClass` and `String` answer for themselves and never consult the operand. Put the wrapper on the left in a test if you want the check to reach every comparison. It is meant for a test suite or CI, not for production, and there is a block form for scoping it the way the ambiguous-error opt-out is scoped:
+
+```ruby
+Errgonomic.with_strict_equality do
+  assert_equal Some(5), book.pages
+end
+```
+
+This gem runs its own Rails integration suite that way, as `rake test:strict`.
 
 ### Rails integration
 
@@ -344,6 +391,8 @@ The declaration reads as well above the include as below it, as `errgonomic_opti
 It is available on every model, converted or not, because it lifts both ends one layer. The target is lifted, so a plain record reads as `Some` and a `nil` as `None`. What the delegated call returns is lifted too, so a delegated reader that is itself an Option comes back as one Option rather than two.
 
 `Object#to_option` lifts any value into an Option (`nil.to_option # => None()`). It lifts once and only once: an Option passes through unchanged (`Some(1).to_option # => Some(1)`), so lifting a value whose provenance you do not know is safe. That is the rule everywhere in the integration. An ActiveRecord attribute or association is never an optional of an optional, so a wrapped reader never nests a second Option around a value that already is one. Nesting is invisible until something reaches for the inner value, which is the ambiguous failure the type exists to prevent.
+
+`try` reaches the value inside the Option: `book.isbn.try(:strip)` strips the ISBN and answers `nil` where there is none, and the block form yields the value (`book.isbn.try { |isbn| isbn.strip }`). ActiveSupport's `Object#try` asks `respond_to?` first, which an Option answers `false` to for anything it does not define, so without this it would be a quiet `nil` for every method and would hand a block the wrapper rather than the value. A method the value does not have is still `nil`, as it is for any other receiver, and `try!` is Rails' strict variant, which raises for that and still answers `nil` for a `None`. Both are defined only under this integration, where ActiveSupport's `try` is what they follow.
 
 #### ActiveRecord compromises
 

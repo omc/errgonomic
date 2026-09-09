@@ -87,7 +87,34 @@ module Errgonomic
       #   Ok(1).object_id == Ok(1).object_id # => false
       #   Ok(1) == 1 # => false
       #   Err() == nil # => false
+      #
+      # @example strict equality makes a cross-type comparison an error
+      #   Errgonomic.with_strict_equality do
+      #     begin
+      #       Ok(1) == 1
+      #     rescue Errgonomic::TypeMismatchError => e
+      #       e.class
+      #     end
+      #   end # => Errgonomic::TypeMismatchError
+      #   Errgonomic.with_strict_equality { Ok(1) == Ok(1) } # => true
+      #   Errgonomic.with_strict_equality do
+      #     begin
+      #       Ok(1) != 1
+      #     rescue Errgonomic::TypeMismatchError => e
+      #       e.message.include?("!=")
+      #     end
+      #   end # => true
+      #
+      # @example an Option is another container, not another Result
+      #   Errgonomic.with_strict_equality do
+      #     begin
+      #       Ok(1) == Some(1)
+      #     rescue Errgonomic::TypeMismatchError => e
+      #       e.message.include?("different containers")
+      #     end
+      #   end # => true
       def ==(other)
+        strict_equality!(other, '==')
         return false if self.class != other.class
 
         value == other.value
@@ -103,7 +130,25 @@ module Errgonomic
       #   Ok(1).eql?(Err(1)) # => false
       #   { Ok(5) => 1 }[Ok(5)] # => 1
       #   [Err(:a), Err(:a)].uniq # => [Err(:a)]
+      #
+      # @example strict equality reaches eql?, and leaves hash alone
+      #   Errgonomic.with_strict_equality do
+      #     begin
+      #       Ok(5).eql?(5)
+      #     rescue Errgonomic::TypeMismatchError => e
+      #       e.class
+      #     end
+      #   end # => Errgonomic::TypeMismatchError
+      #   Errgonomic.with_strict_equality { Ok(5).hash == Ok(5).hash } # => true
+      # Ruby derives != from ==, so a strict-equality message would name the
+      # operator the caller did not write.
+      def !=(other)
+        strict_equality!(other, '!=')
+        super
+      end
+
       def eql?(other)
+        strict_equality!(other, 'eql?')
         self.class == other.class && value.eql?(other.value)
       end
 
@@ -169,15 +214,17 @@ module Errgonomic
       end
 
       # Return the inner value of an Ok, else raise an exception with the given
-      # message when Err.
+      # message when Err. A block is called only on the Err branch, so a
+      # message that interpolates costs nothing on the path that succeeds.
       #
       # @param msg [String]
       #
       # @example
       #   Ok(1).expect!("should have worked") # => 1
       #   Err(:d).expect!("should have worked") # => raise Errgonomic::ExpectError, "should have worked"
-      def expect!(msg)
-        raise Errgonomic::ExpectError, msg unless ok?
+      #   Err(:d).expect! { "no rate for #{7}" } # => raise Errgonomic::ExpectError, "no rate for 7"
+      def expect!(msg = nil, &block)
+        raise Errgonomic::ExpectError, block ? block.call : msg unless ok?
 
         @value
       end
@@ -347,14 +394,18 @@ module Errgonomic
         Err(block.call(value))
       end
 
-      # Refuse to serialize an unwrapped Result as a String. Results must be
-      # correctly handled to access their inner value.
+      # Render as inspect does. Rust gives Result a Debug and no Display, so
+      # refusing was faithful, but a to_s that raises replaces the real
+      # exception while a rescue builds its log line, and the rendered form
+      # says plainly that a wrapper arrived where a value was meant.
       #
       # @example
-      #   Ok("").to_s # => raise Errgonomic::SerializeError, "cannot serialize an unwrapped Result"
-      #   Err("").to_s # => raise Errgonomic::SerializeError, "cannot serialize an unwrapped Result"
+      #   Ok(1).to_s # => "Ok(1)"
+      #   Err(:nope).to_s # => "Err(:nope)"
+      #   Err().to_s # => "Err()"
+      #   "outcome: #{Ok(1)}" # => "outcome: Ok(1)"
       def to_s
-        raise Errgonomic::SerializeError, 'cannot serialize an unwrapped Result'
+        inspect
       end
 
       # Refuse to serialize an unwrapped Result as JSON. Not only should we
@@ -405,6 +456,27 @@ module Errgonomic
       #   end # => "Measurement produced an exception -- StandardError: nope"
       def deconstruct
         [self, value]
+      end
+
+      private
+
+      def strict_equality!(other, operator)
+        return unless Errgonomic.strict_equality?
+        return if other.is_a?(Errgonomic::Result::Any)
+
+        raise Errgonomic::TypeMismatchError,
+              "#{self.class} #{operator} #{other.class}, which strict equality refuses.\n" \
+              "#{strict_equality_remedy(other)}"
+      end
+
+      def strict_equality_remedy(other)
+        return <<~MSG.chomp if other.is_a?(Errgonomic::Option::Any)
+          A Result and an Option are different containers, and neither is the other.
+          Unwrap the one you meant (res.unwrap_or(nil) == opt.unwrap_or(nil)).
+        MSG
+
+        "Compare Results (res == Ok(#{other.inspect})), test the inner value " \
+          "(res.ok_and? { |v| v == #{other.inspect} }), or unwrap_or a fallback first."
       end
     end
 
@@ -474,8 +546,9 @@ module Errgonomic
       # @example
       #   Err(:nope).inspect # => "Err(:nope)"
       #   Err().inspect # => "Err()"
+      #   Errgonomic.with_strict_equality { Err(Some(1)).inspect } # => "Err(Some(1))"
       def inspect
-        return 'Err()' if value == Arbitrary
+        return 'Err()' if value.equal?(Arbitrary)
 
         "Err(#{value.inspect})"
       end
