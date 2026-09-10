@@ -12,6 +12,7 @@ This release reverts the 0.9.0 change that made `to_s` render an Option or a Res
 
 - [Behavior change] `to_s` on an Option or a Result raises `Errgonomic::SerializeError` where 0.9.0 rendered it as `inspect` does. The message names the value with its `inspect`, bounded to 60 characters, says `to_s` is refused, and names `inspect` for a log line and `unwrap_or` / `expect!` for the value: `Some(1) refuses to_s; use inspect for a log line, or unwrap_or / expect! for the value`. 0.9.0's rendering wrote wrapper text into data at every site that built a string from a wrapped reader, with no exception to find the site by: a UNIQUE identity column, a hostname, a hashed auth token and a customer-facing page. A raise that names the remedy serves the log-line case 0.9.0 traded for, and `inspect` is unchanged
 - An Option or a Result in a Hash key raises on its way to JSON again. The json gem and ActiveSupport's `as_json` both stringify a key with `to_s`, so 0.9.0's rendering let `{ Some(1) => 2 }.as_json` write `{"Some(1)" => 2}` where a value position had always raised
+- `Result#unwrap_err!` on an `Ok` raises an `Errgonomic::UnwrapError` whose message is the Ok's value as `inspect` renders it, bounded to 60 characters, and whose `value` is the value itself. The message used to be the value's `to_s`, so once `to_s` refuses, `Ok(Some(1)).unwrap_err!` printed only the class name and its `message` raised. A String value is quoted in the message, as `inspect` quotes it
 
 ## [0.9.0] - 2026-09-08
 
