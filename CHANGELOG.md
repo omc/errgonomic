@@ -6,7 +6,7 @@ This release makes every `Err` carry an error and removes `Option#ok`, the one m
 
 ### Upgrading from 0.10.1
 
-Replace `Err()` with `Err(reason)`, and a pattern `in Err()` with `in Err` or `in Err(_)`: `Err()` and `Err.new` with no argument raise `ArgumentError`, and `in Err()` no longer matches any `Err`. Replace `opt.ok` with `opt.ok_or(reason)`; `ok` on an Option now raises `Errgonomic::UnwrappedAccessError`, which names `ok_or` and `ok_or_else`.
+Replace `Err()` with `Err(reason)`, and a pattern `in Err()` with `in Err` or `in Err(_)`: `Err()` and `Errgonomic::Result::Err.new` with no argument raise `ArgumentError`, and `in Err()` no longer matches any `Err`. Replace `opt.ok` with `opt.ok_or(reason)`; `ok` on an Option now raises `Errgonomic::UnwrappedAccessError`, which names `ok_or` and `ok_or_else`.
 
 ### Changes
 
