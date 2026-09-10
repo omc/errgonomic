@@ -12,6 +12,7 @@ Replace `Err()` with `Err(reason)`, and a pattern `in Err()` with `in Err` or `i
 
 - [Behavior change] `Err()` and `Errgonomic::Result::Err.new` with no argument raise `ArgumentError`. A value-less `Err` held an internal placeholder, `Errgonomic::Result::Err::Arbitrary`, which `unwrap_err!` handed back to the caller, a gem-internal value leaking into application data. The placeholder is deleted along with the special case that made `Err().deconstruct` answer `[]`, so `Err(e).deconstruct` is always `[e]`, `in Err(e)` and `in Err(_)` match every `Err`, and `in Err()` matches none. `Err(nil)` is unchanged: it carries `nil`
 - `Option#ok` is removed. `None().ok` was the only method that returned a value-less `Err`, and Rust has no `Option::ok`; `ok_or` and `ok_or_else` make the caller name the error
+- [Docs] The README's Known limitations section names a converted model's `belongs_to ..., optional: true, touch: true`, which raises `Errgonomic::UnwrappedAccessError` on a save or a destroy with the association absent because a `None` does not delegate `persisted?`, and gives `errgonomic_optional_except` as the way around it. The limitation predates 0.10.2
 
 ## [0.10.1] - 2026-09-10
 

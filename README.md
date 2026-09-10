@@ -423,6 +423,10 @@ This is the register of where the gem leaves the Rust idiom, and why. ActiveReco
 
 The set is closed. If a future integration appears to need a sixth compromise, that is a signal ActiveRecord is pushing back somewhere unmapped, and it warrants a design discussion rather than a quiet patch. `errgonomic_optional_except` and `errgonomic_serialize_none` are deliberately not on the list: they are configuration, an escape hatch that softens the all-or-nothing include for whatever conflict shows up next and a choice of how an absent value is written, rather than semantic exceptions.
 
+#### Known limitations
+
+A converted model with `belongs_to :writer, optional: true, touch: true` raises `Errgonomic::UnwrappedAccessError` (``undefined method `persisted?' for None``) when it saves or is destroyed with the association absent: on `create`, on any `update`, and on `destroy`. ActiveRecord's touch callback reads the association back through the public reader and asks `record && record.persisted?`, and a `None` is truthy and does not delegate `persisted?` the way a `Some` does. Leave the association unwrapped with `errgonomic_optional_except :writer`, which keeps `touch: true` working and hands back `nil` for an absent record.
+
 ## Development
 
 After checking out the repo, run `bin/setup` to install dependencies. You can also run `bin/console` for an interactive prompt that will allow you to experiment. The repository is a self-contained Nix flake; with direnv, `direnv allow` puts the right toolchain on your path.
