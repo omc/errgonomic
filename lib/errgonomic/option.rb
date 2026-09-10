@@ -2,6 +2,7 @@
 
 require 'set'
 require 'stringio'
+require_relative 'variant_name'
 
 module Errgonomic
   module Option
@@ -999,5 +1000,5 @@ end
 
 # The variants under their short names, so a pattern reads as it does in
 # Rust: `in Some(v)`, `in None`.
-Some = Errgonomic::Option::Some
-None = Errgonomic::Option::None
+Errgonomic::VariantName.define(:Some, Errgonomic::Option::Some)
+Errgonomic::VariantName.define(:None, Errgonomic::Option::None)

@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative 'variant_name'
+
 module Errgonomic
   module Result
     # The base class for Result's Ok and Err class variants. We implement as
@@ -688,5 +690,5 @@ end
 
 # The variants under their short names, so a pattern reads as it does in
 # Rust: `in Ok(v)`, `in Err(e)`.
-Ok = Errgonomic::Result::Ok
-Err = Errgonomic::Result::Err
+Errgonomic::VariantName.define(:Ok, Errgonomic::Result::Ok)
+Errgonomic::VariantName.define(:Err, Errgonomic::Result::Err)
