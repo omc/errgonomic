@@ -105,7 +105,11 @@ module Errgonomic
         RUST_SPELLINGS.key?(name) || super
       end
 
-      # Equality comparison for Result objects is based on value not reference.
+      # A Result equals another Result of the same variant with an equal
+      # inner value. Comparing it with anything that is not a Result raises
+      # Errgonomic::TypeMismatchError, on the terms Option#== states: the
+      # raise reaches ==, !=, eql? and ===, hashing stays quiet, and a bare
+      # value on the left answers for itself.
       #
       # @param other [Object]
       #
@@ -113,39 +117,35 @@ module Errgonomic
       #   Ok(1) == Ok(1) # => true
       #   Ok(1) == Err(1) # => false
       #   Ok(1).object_id == Ok(1).object_id # => false
-      #   Ok(1) == 1 # => false
-      #   Err() == nil # => false
       #
-      # @example strict equality makes a cross-type comparison an error
-      #   Errgonomic.with_strict_equality do
-      #     begin
-      #       Ok(1) == 1
-      #     rescue Errgonomic::TypeMismatchError => e
-      #       e.class
-      #     end
+      # @example a cross-type comparison is an error, never a quiet false
+      #   Ok(1) == 1 # => raise Errgonomic::TypeMismatchError, "Errgonomic::Result::Ok == Integer, which strict equality refuses.\nCompare Results (res == Ok(1)), test the inner value (res.ok_and? { |v| v == 1 }), or unwrap_or a fallback first."
+      #   Ok(1) != 1 # => raise Errgonomic::TypeMismatchError, "Errgonomic::Result::Ok != Integer, which strict equality refuses.\nCompare Results (res == Ok(1)), test the inner value (res.ok_and? { |v| v == 1 }), or unwrap_or a fallback first."
+      #   Ok(1) === 1 # => raise Errgonomic::TypeMismatchError, "Errgonomic::Result::Ok === Integer, which strict equality refuses.\nCompare Results (res == Ok(1)), test the inner value (res.ok_and? { |v| v == 1 }), or unwrap_or a fallback first."
+      #   Err() == nil # => raise Errgonomic::TypeMismatchError, "Errgonomic::Result::Err == NilClass, which strict equality refuses.\nCompare Results (res == Ok(nil)), test the inner value (res.ok_and? { |v| v == nil }), or unwrap_or a fallback first."
+      #   Ok(1) === Ok(1) # => true
+      #   begin
+      #     [Ok(1)].include?(1)
+      #   rescue Errgonomic::TypeMismatchError => e
+      #     e.class
       #   end # => Errgonomic::TypeMismatchError
-      #   Errgonomic.with_strict_equality { Ok(1) == Ok(1) } # => true
-      #   Errgonomic.with_strict_equality do
-      #     begin
-      #       Ok(1) != 1
-      #     rescue Errgonomic::TypeMismatchError => e
-      #       e.message.include?("!=")
-      #     end
-      #   end # => true
+      #   { Ok(1) => :v }[1] # => nil
+      #   nil == Err() # => false
       #
       # @example an Option is another container, not another Result
-      #   Errgonomic.with_strict_equality do
-      #     begin
-      #       Ok(1) == Some(1)
-      #     rescue Errgonomic::TypeMismatchError => e
-      #       e.message.include?("different containers")
-      #     end
-      #   end # => true
+      #   Ok(1) == Some(1) # => raise Errgonomic::TypeMismatchError, "Errgonomic::Result::Ok == Errgonomic::Option::Some, which strict equality refuses.\nA Result and an Option are different containers, and neither is the other.\nUnwrap the one you meant (res.unwrap_or(nil) == opt.unwrap_or(nil))."
       def ==(other)
         strict_equality!(other, '==')
         return false if self.class != other.class
 
         value == other.value
+      end
+
+      # Object#=== is ==, so a `case value when Ok(1)` and a pinned pattern
+      # reach the same check, named for the operator that was written.
+      def ===(other)
+        strict_equality!(other, '===')
+        self == other
       end
 
       # Hash-based collections (Hash keys, Set, uniq, group_by) use eql? and
@@ -159,25 +159,19 @@ module Errgonomic
       #   { Ok(5) => 1 }[Ok(5)] # => 1
       #   [Err(:a), Err(:a)].uniq # => [Err(:a)]
       #
-      # @example strict equality reaches eql?, and leaves hash alone
-      #   Errgonomic.with_strict_equality do
-      #     begin
-      #       Ok(5).eql?(5)
-      #     rescue Errgonomic::TypeMismatchError => e
-      #       e.class
-      #     end
-      #   end # => Errgonomic::TypeMismatchError
-      #   Errgonomic.with_strict_equality { Ok(5).hash == Ok(5).hash } # => true
+      # @example a cross-type eql? raises as == does, and hash is untouched
+      #   Ok(5).eql?(5) # => raise Errgonomic::TypeMismatchError, "Errgonomic::Result::Ok eql? Integer, which strict equality refuses.\nCompare Results (res == Ok(5)), test the inner value (res.ok_and? { |v| v == 5 }), or unwrap_or a fallback first."
+      #   Ok(5).hash == Ok(5).hash # => true
+      def eql?(other)
+        strict_equality!(other, 'eql?')
+        self.class == other.class && value.eql?(other.value)
+      end
+
       # Ruby derives != from ==, so a strict-equality message would name the
       # operator the caller did not write.
       def !=(other)
         strict_equality!(other, '!=')
         super
-      end
-
-      def eql?(other)
-        strict_equality!(other, 'eql?')
-        self.class == other.class && value.eql?(other.value)
       end
 
       # @example
@@ -528,7 +522,6 @@ module Errgonomic
       end
 
       def strict_equality!(other, operator)
-        return unless Errgonomic.strict_equality?
         return if other.is_a?(Errgonomic::Result::Any)
 
         raise Errgonomic::TypeMismatchError,
@@ -609,7 +602,7 @@ module Errgonomic
       # @example
       #   Err(:nope).inspect # => "Err(:nope)"
       #   Err().inspect # => "Err()"
-      #   Errgonomic.with_strict_equality { Err(Some(1)).inspect } # => "Err(Some(1))"
+      #   Err(Some(1)).inspect # => "Err(Some(1))"
       def inspect
         return 'Err()' if value.equal?(Arbitrary)
 
