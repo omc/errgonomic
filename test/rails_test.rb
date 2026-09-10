@@ -14,6 +14,8 @@ require 'logger'
 require 'stringio'
 require 'tmpdir'
 require 'fileutils'
+require 'open3'
+require 'rbconfig'
 
 require_relative '../lib/errgonomic/rails'
 
@@ -932,10 +934,8 @@ class BugTest < Minitest::Test
   # The json gem and ActiveSupport's as_json both stringify a Hash key with
   # to_s, so the refusal reaches a key position through to_s alone.
   def test_an_option_in_a_hash_key_refuses_to_serialize
-    assert_raises(Errgonomic::SerializeError) { { Some(1) => 2 }.to_json }
     assert_raises(Errgonomic::SerializeError) { { Some(1) => 2 }.as_json }
     assert_raises(Errgonomic::SerializeError) { JSON.generate({ Some(1) => 2 }) }
-    assert_raises(Errgonomic::SerializeError) { [1, 2, 3].group_by { |i| i.even? ? Some(:even) : None() }.to_json }
     assert_raises(Errgonomic::SerializeError) { [1, 2, 3].group_by { |i| i.even? ? Some(:even) : None() }.as_json }
     assert_raises(Errgonomic::SerializeError) { { Ok(1) => 2 }.as_json }
     assert_raises(Errgonomic::SerializeError) { JSON.generate({ Err(:x) => 2 }) }
@@ -949,6 +949,28 @@ class BugTest < Minitest::Test
     Book.create!(title: 'Anonymous')
 
     assert_raises(Errgonomic::SerializeError) { Book.all.group_by(&:author).to_json }
+  end
+
+  # ActiveSupport's to_json reaches a key through as_json, which refuses
+  # whatever to_s does, so the json gem's own key path runs in a child
+  # process that loads the json gem and nothing of ActiveSupport.
+  def test_the_json_gem_alone_refuses_an_option_in_a_hash_key
+    script = <<~CHILD
+      [-> { { Some(1) => 2 }.to_json },
+       -> { [1, 2, 3].group_by { |i| i.even? ? Some(:even) : None() }.to_json }].each do |call|
+        puts call.call
+      rescue Errgonomic::SerializeError => e
+        puts e.message
+      end
+      puts defined?(ActiveSupport).inspect
+    CHILD
+    lib = File.expand_path('../lib', __dir__)
+    out, err, status = Open3.capture3(RbConfig.ruby, '-I', lib, '-rjson', '-rerrgonomic', '-e', script)
+
+    assert status.success?, err
+    assert_equal ['Some(1) refuses to_s; use inspect for a log line, or unwrap_or / expect! for the value',
+                  'None refuses to_s; use inspect for a log line, or unwrap_or / expect! for the value',
+                  'nil'], out.lines(chomp: true)
   end
 
   # A conversion changes what a reader returns, not what a record serializes:
