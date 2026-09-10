@@ -65,67 +65,93 @@ module Errgonomic
       end
 
       # An Option equals another Option of the same class with an equal inner
-      # value. Anything else, including nil and the raw inner value, is not
-      # equal: quietly false, never an error. Rust rejects Some(5) == 5 at
-      # compile time; Ruby cannot, and raising here would break the many
-      # places Ruby compares heterogeneous operands (Array#include?,
-      # assertion diffs, dirty tracking). Compare Options (opt == Some(5)) or
-      # test the inner value (opt.some_and? { |v| v == 5 }) instead.
+      # value. Comparing it with anything that is not an Option raises
+      # Errgonomic::TypeMismatchError, naming both sides and the spelling to
+      # reach for. Some(5) == 5 is the comparison Rust rejects at compile
+      # time, and a quiet false there is a silent wrong branch, the same
+      # failure as a wrapper written into a string. The raise reaches ==, !=,
+      # eql? and ===, and through them every collection operation that
+      # compares pairwise. Ruby's hashing compares hash values first and asks
+      # eql? only of a candidate whose hash matches, so a Hash lookup, a Set
+      # and uniq stay quiet with a wrong-typed key: strict equality never
+      # answers wrong, it only sometimes fails to catch. nil == Some(1) is
+      # answered by NilClass and cannot be intercepted.
       #
-      # None() == nil is likewise false: None is a value that represents
-      # absence, not an absence Ruby can see. (The Rails integration
-      # separately makes None#nil? answer true, as an ActiveRecord
-      # compromise; equality does not follow it.)
+      # None() == nil raises too: None is a value that represents absence,
+      # not an absence Ruby can see, and the message points at none?. (The
+      # Rails integration separately makes None#nil? answer true, as an
+      # ActiveRecord compromise; equality does not follow it.)
       #
       # @example
       #   Some(1) == Some(1) # => true
       #   Some(1) == Some(2) # => false
       #   Some(1) == None() # => false
       #   None() == None() # => true
-      #   Some(1) == 1 # => false
-      #   None() == nil # => false
       #
-      # @example strict equality makes a cross-type comparison an error
-      #   Errgonomic.with_strict_equality do
-      #     begin
-      #       Some(5) == 5
-      #     rescue Errgonomic::TypeMismatchError => e
-      #       e.class
-      #     end
-      #   end # => Errgonomic::TypeMismatchError
-      #   Errgonomic.with_strict_equality do
-      #     begin
-      #       Some(5) != 5
-      #     rescue Errgonomic::TypeMismatchError => e
-      #       e.message.include?("!=")
-      #     end
-      #   end # => true
-      #   Errgonomic.with_strict_equality { Some(5) == Some(5) } # => true
-      #   Errgonomic.with_strict_equality { Some(5) == None() } # => false
+      # @example a cross-type comparison is an error, never a quiet false
+      #   Some(5) == 5 # => raise Errgonomic::TypeMismatchError, "Errgonomic::Option::Some == Integer, which strict equality refuses.\nCompare Options (opt == Some(5)), test the inner value (opt.some_and? { |v| v == 5 }), or unwrap_or a fallback first."
+      #   Some(5) != 5 # => raise Errgonomic::TypeMismatchError, "Errgonomic::Option::Some != Integer, which strict equality refuses.\nCompare Options (opt == Some(5)), test the inner value (opt.some_and? { |v| v == 5 }), or unwrap_or a fallback first."
+      #   Some(5) === 5 # => raise Errgonomic::TypeMismatchError, "Errgonomic::Option::Some === Integer, which strict equality refuses.\nCompare Options (opt == Some(5)), test the inner value (opt.some_and? { |v| v == 5 }), or unwrap_or a fallback first."
+      #   Some(5) === Some(5) # => true
+      #   1 == Some(1) # => raise Errgonomic::TypeMismatchError, "Errgonomic::Option::Some == Integer, which strict equality refuses.\nCompare Options (opt == Some(1)), test the inner value (opt.some_and? { |v| v == 1 }), or unwrap_or a fallback first."
       #
       # @example a Result is another container, not another Option
-      #   Errgonomic.with_strict_equality do
-      #     begin
-      #       Some(1) == Ok(1)
-      #     rescue Errgonomic::TypeMismatchError => e
-      #       e.message.include?("different containers")
-      #     end
-      #   end # => true
+      #   Some(1) == Ok(1) # => raise Errgonomic::TypeMismatchError, "Errgonomic::Option::Some == Errgonomic::Result::Ok, which strict equality refuses.\nAn Option and a Result are different containers, and neither is the other. Unwrap the one you meant (opt.unwrap_or(nil) == res.unwrap_or(nil))."
       #
       # @example nil is another type, and absence here is the discriminant
-      #   Errgonomic.with_strict_equality do
-      #     begin
-      #       None() == nil
-      #     rescue Errgonomic::TypeMismatchError => e
-      #       e.message.include?("none?")
+      #   None() == nil # => raise Errgonomic::TypeMismatchError, "Errgonomic::Option::None == NilClass, which strict equality refuses.\nAbsence here is the discriminant: ask none?, or nil? under the Rails integration."
+      #
+      # @example the raise reaches every operation that compares pairwise
+      #   begin
+      #     [Some(1)].include?(1)
+      #   rescue Errgonomic::TypeMismatchError => e
+      #     e.class
+      #   end # => Errgonomic::TypeMismatchError
+      #   begin
+      #     [Some(1)] == [1]
+      #   rescue Errgonomic::TypeMismatchError => e
+      #     e.class
+      #   end # => Errgonomic::TypeMismatchError
+      #   begin
+      #     [Some(1), 1] - [1]
+      #   rescue Errgonomic::TypeMismatchError => e
+      #     e.class
+      #   end # => Errgonomic::TypeMismatchError
+      #   begin
+      #     { a: Some(1) } == { a: 1 }
+      #   rescue Errgonomic::TypeMismatchError => e
+      #     e.class
+      #   end # => Errgonomic::TypeMismatchError
+      #   begin
+      #     case 5
+      #     when Some(5) then :hit
       #     end
-      #   end # => true
+      #   rescue Errgonomic::TypeMismatchError => e
+      #     e.class
+      #   end # => Errgonomic::TypeMismatchError
+      #
+      # @example hashing compares hash values first, so these stay quiet
+      #   { Some(1) => :v }[1] # => nil
+      #   Set[Some(1)].include?(1) # => false
+      #   [Some(1), 1].uniq # => [Some(1), 1]
+      #   [Some(1)] | [1] # => [Some(1), 1]
+      #
+      # @example nil and String answer for themselves, and never ask the Option
+      #   nil == Some(1) # => false
+      #   "a" == Some("a") # => false
       def ==(other)
         strict_equality!(other, '==')
         return false if self.class != other.class
         return true if none?
 
         value == other.value
+      end
+
+      # Object#=== is ==, so a `case value when Some(5)` and a pinned pattern
+      # reach the same check, named for the operator that was written.
+      def ===(other)
+        strict_equality!(other, '===')
+        self == other
       end
 
       # Hash-based collections (Hash keys, Set, uniq, group_by) use eql? and
@@ -140,28 +166,22 @@ module Errgonomic
       #   { Some(5) => 1 }[Some(5)] # => 1
       #   [Some(1), Some(1), None(), None()].uniq # => [Some(1), None()]
       #
-      # @example strict equality reaches eql?, and leaves hash alone
-      #   Errgonomic.with_strict_equality do
-      #     begin
-      #       Some(5).eql?(5)
-      #     rescue Errgonomic::TypeMismatchError => e
-      #       e.class
-      #     end
-      #   end # => Errgonomic::TypeMismatchError
-      #   Errgonomic.with_strict_equality { Some(5).hash == Some(5).hash } # => true
-      # Ruby derives != from ==, so a strict-equality message would name the
-      # operator the caller did not write.
-      def !=(other)
-        strict_equality!(other, '!=')
-        super
-      end
-
+      # @example a cross-type eql? raises as == does, and hash is untouched
+      #   Some(5).eql?(5) # => raise Errgonomic::TypeMismatchError, "Errgonomic::Option::Some eql? Integer, which strict equality refuses.\nCompare Options (opt == Some(5)), test the inner value (opt.some_and? { |v| v == 5 }), or unwrap_or a fallback first."
+      #   Some(5).hash == Some(5).hash # => true
       def eql?(other)
         strict_equality!(other, 'eql?')
         return false if self.class != other.class
         return true if none?
 
         value.eql?(other.value)
+      end
+
+      # Ruby derives != from ==, so a strict-equality message would name the
+      # operator the caller did not write.
+      def !=(other)
+        strict_equality!(other, '!=')
+        super
       end
 
       # @example
@@ -855,7 +875,6 @@ module Errgonomic
       end
 
       def strict_equality!(other, operator)
-        return unless Errgonomic.strict_equality?
         return if other.is_a?(Errgonomic::Option::Any)
 
         raise Errgonomic::TypeMismatchError,
