@@ -27,7 +27,7 @@ module Errgonomic
       #   end # => Errgonomic::UnwrappedAccessError
       #   Ok(1).respond_to?(:value) # => false
       #   Ok(1).frozen? # => true
-      #   Err().frozen? # => true
+      #   Err(:x).frozen? # => true
       def initialize(value)
         @value = value
         freeze
@@ -124,7 +124,7 @@ module Errgonomic
       #   Ok(1) == 1 # => raise Errgonomic::TypeMismatchError, "Errgonomic::Result::Ok == Integer, which strict equality refuses.\nCompare Results (res == Ok(1)), test the inner value (res.ok_and? { |v| v == 1 }), or unwrap_or a fallback first."
       #   Ok(1) != 1 # => raise Errgonomic::TypeMismatchError, "Errgonomic::Result::Ok != Integer, which strict equality refuses.\nCompare Results (res == Ok(1)), test the inner value (res.ok_and? { |v| v == 1 }), or unwrap_or a fallback first."
       #   Ok(1) === 1 # => raise Errgonomic::TypeMismatchError, "Errgonomic::Result::Ok === Integer, which strict equality refuses.\nCompare Results (res == Ok(1)), test the inner value (res.ok_and? { |v| v == 1 }), or unwrap_or a fallback first."
-      #   Err() == nil # => raise Errgonomic::TypeMismatchError, "Errgonomic::Result::Err == NilClass, which strict equality refuses.\nCompare Results (res == Ok(nil)), test the inner value (res.ok_and? { |v| v == nil }), or unwrap_or a fallback first."
+      #   Err(:x) == nil # => raise Errgonomic::TypeMismatchError, "Errgonomic::Result::Err == NilClass, which strict equality refuses.\nCompare Results (res == Ok(nil)), test the inner value (res.ok_and? { |v| v == nil }), or unwrap_or a fallback first."
       #   Ok(1) === Ok(1) # => true
       #   begin
       #     [Ok(1)].include?(1)
@@ -132,7 +132,7 @@ module Errgonomic
       #     e.class
       #   end # => Errgonomic::TypeMismatchError
       #   { Ok(1) => :v }[1] # => nil
-      #   nil == Err() # => false
+      #   nil == Err(:x) # => false
       #
       # @example an Option is another container, not another Result
       #   Ok(1) == Some(1) # => raise Errgonomic::TypeMismatchError, "Errgonomic::Result::Ok == Errgonomic::Option::Some, which strict equality refuses.\nA Result and an Option are different containers, and neither is the other.\nUnwrap the one you meant (res.unwrap_or(nil) == opt.unwrap_or(nil))."
@@ -468,35 +468,24 @@ module Errgonomic
       end
 
       # The Rust shape: each variant deconstructs to its one payload, so
-      # `in Ok(v)` binds the value and `in Err(e)` binds the error. A
-      # value-less Err deconstructs to nothing: the sentinel behind it is
-      # internal and must never bind to a pattern variable.
+      # `in Ok(v)` binds the value and `in Err(e)` binds the error.
       #
       # @example
       #   Ok(1).deconstruct # => [1]
-      #   Err(:e).deconstruct # => [:e]
-      #   Err().deconstruct # => []
+      #   Err(:x).deconstruct # => [:x]
       #   Ok(1).respond_to?(:deconstruct_keys) # => false
       #
-      # @example a value-less Err matches `in Err` and `in Err()`, never `in Err(e)`
-      #   case Err()
-      #   in Err(e) then e
-      #   in Err then :no_value
-      #   end # => :no_value
-      #   case Err()
-      #   in Err() then :no_value
-      #   end # => :no_value
+      # @example every Err carries an error, so `in Err()` matches none of them
       #   case Err(:x)
+      #   in Err() then :empty
       #   in Err(e) then e
-      #   in Err then :no_value
       #   end # => :x
-      #   begin
-      #     case Err()
-      #     in Err(e) then e
-      #     end
-      #   rescue NoMatchingPatternError => e
-      #     e.class
-      #   end # => NoMatchingPatternError
+      #   case Err(:x)
+      #   in Err then :any_err
+      #   end # => :any_err
+      #   case Err(:x)
+      #   in Err(_) then :any_err
+      #   end # => :any_err
       #
       # @example a two-branch case/in with no else is exhaustive
       #   case Ok(1)
@@ -608,18 +597,16 @@ module Errgonomic
       end
     end
 
-    # The Err variant.
+    # The Err variant. It always carries an error, so unwrap_err! and a
+    # pattern variable bind what the caller put there.
+    #
+    # @example an Err without an error raises
+    #   Err(:e).unwrap_err! # => :e
+    #   Err() # => raise ArgumentError, "wrong number of arguments (given 0, expected 1)"
+    #   Err.new # => raise ArgumentError, "wrong number of arguments (given 0, expected 1)"
+    #   Errgonomic::Result::Err.new # => raise ArgumentError, "wrong number of arguments (given 0, expected 1)"
     class Err < Any
       class Arbitrary; end
-
-      # Err may be constructed without a value, if you want.
-      #
-      # @example
-      #   Err(:y).unwrap_err! # => :y
-      #   Err().unwrap_err! # => Arbitrary
-      def initialize(value = Arbitrary)
-        super(value)
-      end
 
       # Err is always err
       #
@@ -637,11 +624,10 @@ module Errgonomic
         false
       end
 
-      # Render like Rust's Debug; a value-less Err renders bare.
+      # Render like Rust's Debug, delegating to the inner value's inspect.
       #
       # @example
       #   Err(:nope).inspect # => "Err(:nope)"
-      #   Err().inspect # => "Err()"
       #   Err(Some(1)).inspect # => "Err(Some(1))"
       def inspect
         return 'Err()' if value.equal?(Arbitrary)
@@ -687,7 +673,7 @@ def Ok(value)
 end
 
 # Global convenience method for constructing an Err result.
-def Err(value = Errgonomic::Result::Err::Arbitrary)
+def Err(value)
   Errgonomic::Result::Err.new(value)
 end
 
