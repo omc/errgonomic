@@ -1,5 +1,72 @@
 ## [Unreleased]
 
+## [0.10.2] - 2026-09-10
+
+This release makes every `Err` carry an error and removes `Option#ok`, the one method that built an `Err` without one.
+
+### Upgrading from 0.10.1
+
+Replace `Err()` with `Err(reason)`, and a pattern `in Err()` with `in Err` or `in Err(_)`: `Err()` and `Errgonomic::Result::Err.new` with no argument raise `ArgumentError`, and `in Err()` no longer matches any `Err`. Replace `opt.ok` with `opt.ok_or(reason)`; `ok` on an Option now raises `Errgonomic::UnwrappedAccessError`, which names `ok_or` and `ok_or_else`.
+
+### Changes
+
+- [Behavior change] `Err()` and `Errgonomic::Result::Err.new` with no argument raise `ArgumentError`. A value-less `Err` held an internal placeholder, `Errgonomic::Result::Err::Arbitrary`, which `unwrap_err!` handed back to the caller, a gem-internal value leaking into application data. The placeholder is deleted along with the special case that made `Err().deconstruct` answer `[]`, so `Err(e).deconstruct` is always `[e]`, `in Err(e)` and `in Err(_)` match every `Err`, and `in Err()` matches none. `Err(nil)` is unchanged: it carries `nil`
+- `Option#ok` is removed. `None().ok` was the only method that returned a value-less `Err`, and Rust has no `Option::ok`; `ok_or` and `ok_or_else` make the caller name the error
+- [Docs] The README's Known limitations section names a converted model's `belongs_to ..., optional: true, touch: true`, which raises `Errgonomic::UnwrappedAccessError` on a save or a destroy with the association absent because a `None` does not delegate `persisted?`, and gives `errgonomic_optional_except` as the way around it. The limitation predates 0.10.2
+
+## [0.10.1] - 2026-09-10
+
+This release makes cross-type equality raise unconditionally and removes the switch that used to turn it on.
+
+### Upgrading from 0.10.0
+
+`Errgonomic.strict_equality=`, `Errgonomic.strict_equality?` and `Errgonomic.with_strict_equality` are removed, along with `rake test:strict`, because cross-type equality always raises now. A `Some(x) == x`, `!= x`, `eql?(x)` or `=== x` anywhere in an application raises `Errgonomic::TypeMismatchError` where 0.10.0 answered `false` unless strict equality was switched on, and so does a collection operation that compares pairwise and asks the wrapper (`[Some(x)].include?(x)`, `Array#index`, `Array#-`, `Array#==`, `Hash#==`, `case x when Some(x)`) and a Minitest `assert_equal` whose expected value is a wrapper. Which operations raise, by which side holds the wrapper, is listed in the README's Strict equality section. Compare wrappers (`opt == Some(x)`), test the inner value (`opt.some_and? { |v| v == x }`), or `unwrap_or` a fallback first. Delete any `Errgonomic.strict_equality = true` in a test helper; it has nothing left to set.
+
+### Changes
+
+- [Behavior change] `==`, `!=`, `eql?` and `===` between an Option or a Result and a value that is not one always raise `Errgonomic::TypeMismatchError`, with the message 0.9.0 gave under the flag. `Some(1) == 1` answering `false` is the silent wrong branch that mirrors a wrapper written into a string, and 0.9.0 had the safe behavior opt-in. `===` is defined so `case 5 when Some(5)` and a pinned pattern raise under the operator that was written. `eql?` is not exempted: Ruby's hashing compares hash values first and asks `eql?` only of a candidate whose hash matches, so `Hash#[]`, `Set` and `uniq` stay quiet while `Array#include?`, `Array#-`, `Array#==` and `case/when` compare pairwise and raise when the wrapper is the operand asked. Strict equality never answers wrong, it only sometimes fails to catch, and `nil == Some(1)` is answered by `NilClass` and cannot be intercepted. The README states the whole surface
+- `Errgonomic.strict_equality=`, `Errgonomic.strict_equality?` and `Errgonomic.with_strict_equality` are removed, which also removes a process-global flag that leaked across threads and whose block form's `ensure` could turn the mode off for a thread that had set it
+- `Errgonomic.lenient_inner_value_comparison?` and `Errgonomic.give_me_lenient_inner_value_comparison=` are removed; nothing read them
+- [Dev, Test] `rake test:strict` is removed, with its support file and CI step: the Rails integration suite runs under strict equality as `rake test`
+
+## [0.10.0] - 2026-09-10
+
+This release gives `deconstruct` the Rust shape and names the four variants at top level, so a pattern reads as `in Some(v)`.
+
+### Upgrading from 0.9.3
+
+`deconstruct` answers `[value]` for a `Some`, an `Ok` and an `Err` and `[]` for a `None`, so a pattern written against 0.9.x's `[self, value]` has to change shape: `in Errgonomic::Option::Some, v` becomes `in Some(v)`, `in Errgonomic::Result::Err, String => msg` becomes `in Err(String => msg)`, and `in Errgonomic::Option::None` stays as it is or becomes `in None`. `Some`, `None`, `Ok` and `Err` are now top-level names for the four variants, for patterns, as well as constructors. An application that defines its own constant under one of those names has to rename it: errgonomic refuses to load over one with a `NameError`, and a `class` or `module` of that name written after it loads raises `TypeError`.
+
+### Changes
+
+- [Behavior change] `deconstruct` answers `[value]` for a `Some`, an `Ok` and an `Err` and `[]` for a `None`, the one-payload shape `Data.define(:value)` and Rust's tuple variants share, where 0.9.x answered `[self, value]` and `[None]`. `in Some(v)` binds the value, `in Ok(Some(v))` nests, a two-branch `case/in` with no `else` is exhaustive, and a wrong type reaches `NoMatchingPatternError`. There is no `deconstruct_keys`: a one-payload sum type has no named field, and a `Some` around a Hash nests as `in Some({ id: })` through the Hash's own protocol
+- A value-less `Err()` deconstructs to `[]`, so `in Err` and `in Err()` match it and `in Err(e)` matches only an `Err` that carries a value. The sentinel `Err()` holds in place of a value is internal, and a pattern variable must never bind it
+- `Some`, `None`, `Ok` and `Err` are defined at top level beside the constructors of the same name, so a pattern reads as it does in Rust. Each is an `Errgonomic::VariantName` rather than the class it names: it matches as that class in a pattern and a `case/when`, and a bare one, written as Rust writes `return None`, refuses to stand in for a value. `to_s`, `to_json`, `as_json` and every ActiveRecord boundary that unwraps an Option raise `Errgonomic::SerializeError` on it, where the class would write `Errgonomic::Option::None` into a string, a column or a query, and a boolean column would store `true`. A constant of the same name that the application already defines stops the gem's load with a `NameError`, and a `class None` written after the gem loads raises `TypeError`, rather than one replacing or reopening the other. Rails defines none of the four
+
+## [0.9.3] - 2026-09-10
+
+This release removes the public `value` slot from `Some`, `Ok` and `Err`, and freezes every instance as it is constructed, so an Option or a Result is the value the README already said it was.
+
+### Upgrading from 0.9.2
+
+`value` and `value=` are gone from `Some`, `Ok` and `Err`, and every instance is frozen as it is constructed. A read of `.value` becomes `unwrap_or(fallback)`, `expect!(message)`, `map`, `and_then` or a pattern, each of which names the other branch; a write of `.value=` becomes a new `Some(v)` assigned where the old one lived. A call to either now raises `Errgonomic::UnwrappedAccessError`, which is a `NoMethodError`, naming the combinators.
+
+### Changes
+
+- [Behavior change] `Some`, `Ok` and `Err` no longer expose `value` or `value=`, and every Option and Result is frozen as it is constructed, whether by `Some`, `None`, `Ok`, `Err`, `new` or a combinator; `clone` keeps it frozen. A copy that skips construction, from `dup`, `Marshal.load`, a YAML load or ActiveSupport's `deep_dup`, is not frozen; with no writer, it changes only through `instance_variable_set`. The reader reached the inner value with no `None` branch, the writer mutated a wrapper through an alias and moved a Hash key out from under its own bucket, and the README already said an Option is a value rather than a slot. The reader is protected, for the sibling reads equality, ordering and `zip` need; a call from outside gets the combinator teaching `Errgonomic::UnwrappedAccessError` gives any other miss
+
+## [0.9.2] - 2026-09-10
+
+This release makes `Option#and`, `#xor`, `#zip` and `#zip_with` check their operand the way `or` already did.
+
+### Upgrading from 0.9.1
+
+`Option#and`, `#xor`, `#zip` and `#zip_with` raise `Errgonomic::ArgumentError` on a bare operand, on a `None` receiver as well as a `Some`. Code that passed a bare value to `and` and read it back has to wrap it.
+
+### Changes
+
+- [Behavior change] `Option#and`, `#xor`, `#zip` and `#zip_with` check their operand the way `or` already did, raising `Errgonomic::ArgumentError` (`other must be an Option, was Integer`) before the receiver's variant is consulted. 0.9.x let `Some(2).and(3)` hand back the bare `3`, let `None().and(3)` and `None().zip(2)` accept the operand silently, and let `Some(1).zip(2)` and `Some(:l).xor(:r)` fall into a bare `NoMethodError` on `some?` or `none?`
+
 ## [0.9.1] - 2026-09-10
 
 This release reverts the 0.9.0 change that made `to_s` render an Option or a Result. The raise is back, with a message that says what to call instead.

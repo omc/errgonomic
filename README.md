@@ -111,16 +111,20 @@ Some(1).each.to_a                # => [1]
 
 `map` wraps whatever the block returns, as Rust's does, so a block that itself returns an Option gives `Some(Some(x))`. `and_then` is the spelling for that block.
 
-Options support pattern matching:
+Options pattern match in the Rust shape. `Some`, `None`, `Ok` and `Err` name the variants in a pattern as well as building them, so a pattern reads as it does in Rust:
 
 ```ruby
 case measurement
-in Errgonomic::Option::Some, value
+in Some(value)
   "Measurement is #{value}"
-in Errgonomic::Option::None
+in None
   "Measurement is not available"
 end
 ```
+
+Leave the `else` off: the two branches cover an Option, and a value that is not one raises `NoMatchingPatternError` where an `else` would take it quietly. When that value is a Result, the error's message refuses to print; see the `case/in` note below. `deconstruct` answers `[value]` for a `Some` and `[]` for a `None`, the one-payload shape `Data.define(:value)` and Rust's tuple variants share, and there is no `deconstruct_keys`, because a one-payload sum type has no named field. Patterns nest through the inner value's own protocol instead: `in Ok(Some(value))` reaches through a Result, and `in Some({ id: })` reaches into a Hash a `Some` wraps.
+
+A bare `Some`, `None`, `Ok` or `Err`, without parentheses, is that name and not a value, where Rust's `return None` is one. It matches as the class it names in a pattern or a `case/when`, and refuses to stand in for a value: interpolation, `to_s`, `join`, `to_json` and `as_json` raise `Errgonomic::SerializeError` (`bare None names a variant for a pattern, not a value; build one with parentheses`), and so does handing one to an ActiveRecord attribute, a bulk write or a `where`. It is not a class, so `is_a?`, `kind_of?` and `instance_of?` raise `TypeError` when given the bare name (`class or module required`), `Some.new`, `Some <= Errgonomic::Option::Any` and `Some.name` raise `NoMethodError`, and Minitest's `assert_kind_of Some, x` raises the same `TypeError` before it can assert anything. Each has a working spelling: check the variant with `x.some?`, `x.none?`, `x.ok?` or `x.err?`, or give the fully qualified class anywhere a class or module is required, as in `x.is_a?(Errgonomic::Option::Some)`, `assert_kind_of Errgonomic::Option::Some, x`, `Errgonomic::Option::Some.new(1)`, `Errgonomic::Option::Some <= Errgonomic::Option::Any` or `Errgonomic::Option::Some.name`. Build with the constructor, `Some(1)`, rather than `.new`. An application constant of the same name collides loudly: defined before errgonomic loads, it stops the load with a `NameError`, and a `class None` or `module Ok` written after raises `TypeError` where it is written. Two forms get past that. `None = …` assigned after the load replaces the name with only Ruby's `already initialized constant` warning, and in a Rails application Zeitwerk skips an autoloaded `app/models/ok.rb` because `Ok` is already defined, so the first call on `Ok` raises `NoMethodError`.
 
 An unhandled Option refuses to leak into your output: `to_s`, `to_json` and `as_json` raise `Errgonomic::SerializeError`, so you handle the inner value deliberately rather than shipping `Some("...")` to a user. The refusal names what it was carrying (`cannot serialize an unwrapped Some("cell-a1b2")`), so a payload built out of many values says which one went unhandled; the value's `inspect` is bounded to 60 characters, with an ellipsis past that. The refusal covers `as_json` because Hash and Array serialization recurses through that method, and an Option nested in a payload would otherwise serialize as `{"value": ...}`. A converted ActiveRecord model is the one exception, at the model boundary: it unwraps each attribute as it serializes, so a record's own `as_json` says what an unconverted record's says. See [Rails integration](#rails-integration).
 
@@ -144,9 +148,9 @@ Writers unwrap under that integration, which changes what a truthiness slip cost
 
 The remaining present-side helpers are soft-deprecated on Options in favor of the combinators. They unwrap, where on any other object they return the receiver: `Some(v).present_or_raise!(msg)`, `present_or(default)` and `present_or_else { }` all yield `v`, and `None` raises, substitutes, or computes. Each prints a one-line stderr nudge naming the combinator to use instead (`expect!`, `unwrap_or`, `unwrap_or_else`), once per process per method rather than once per call, so a hot path does not flood the log. The blank side (`blank_or*`) raises `UnwrappedAccessError` outright: an Option's blankness is its discriminant, so test it with `none?`.
 
-Four of Rust's methods are deliberately absent: `take`, `replace`, `insert` and `get_or_insert`. Every one of them writes through an `&mut Option`, and an Option here is a value rather than a slot: `Some(1)` is something you pass around and compare, not a cell whose contents you swap out from under another reference. Build the Option you want and assign it where the old one lived.
+Four of Rust's methods are deliberately absent: `take`, `replace`, `insert` and `get_or_insert`. Every one of them writes through an `&mut Option`, and an Option here is a value rather than a slot: `Some(1)` is something you pass around and compare, not a cell whose contents you swap out from under another reference. Build the Option you want and assign it where the old one lived. The same rule is why a `Some`, an `Ok` and an `Err` have no `value` reader or writer, and why every instance is frozen as it is constructed. A copy that skips construction, from `dup`, `Marshal.load`, a YAML load or ActiveSupport's `deep_dup`, is not frozen; with no writer, it changes only through `instance_variable_set`. A reader would reach the inner value with no `None` branch, and a writer would move a Hash key out from under its own bucket. Reach in with `unwrap_or`, `expect!`, `map`, `and_then` or a pattern, each of which names what happens on the other branch.
 
-Equality is between Options only: `Some(5) == Some(5)`, but `Some(5) == 5` and `None() == nil` are `false`. That is quiet, never an error, matching how every Ruby object compares across types. Rust rejects `Some(5) == 5` at compile time; Ruby cannot, so guard the idiom in review and tests: compare against a wrapped value (`opt == Some(5)`) or test the inner value (`opt.some_and? { |v| v == 5 }`). `Errgonomic.strict_equality = true` turns that guard into an error, which is what a test suite wants; see [Pedantic runtime checks](#pedantic-runtime-checks).
+Equality is between Options only: `Some(5) == Some(5)` is `true` and `Some(5) == Some(6)` is `false`, and comparing an Option with anything that is not one raises `Errgonomic::TypeMismatchError`. Rust rejects `Some(5) == 5` at compile time; Ruby cannot, and a quiet `false` there is a silent wrong branch, the same failure as a wrapper written into a string. Compare against a wrapped value (`opt == Some(5)`), test the inner value (`opt.some_and? { |v| v == 5 }`), or `unwrap_or` a fallback first. `None() == nil` raises too, pointing at `none?`. See [Strict equality](#strict-equality) for where the raise reaches and where it cannot.
 
 Ordering is between Options too, and unlike equality it says so out loud. `None()` sorts before any `Some` and two `Some`s order by their inner values, so a collection of Options sorts. Ordering one against a bare value raises `Errgonomic::TypeMismatchError` naming both operands and the spellings that work: `Some(read_at) <= Time.current` used to answer `nil` from `<=>`, which `Comparable` turned into an `ArgumentError` naming the Option as the operand at fault. Test the inner value (`read_at.some_and? { |t| t <= Time.current }`) or reach for it with `map` or `unwrap_or`. Two Options whose inner values do not compare still answer `nil`, as Ruby expects. That message is the gem's only where the Option is the receiver: with it on the right (`2 < Some(1)`, `[Some(1), 2].max`) `Integer` answers the comparison itself and Ruby raises its own `ArgumentError: comparison of Integer with Errgonomic::Option::Some failed`. Results order the same way, with `ok_and?` in place of `some_and?`.
 
@@ -172,11 +176,11 @@ Results also pattern match, including against the kind of inner value:
 
 ```ruby
 case result
-in Errgonomic::Result::Ok, value
+in Ok(value)
   "Measurement is #{value}"
-in Errgonomic::Result::Err, String => msg
+in Err(String => msg)
   "Measurement failed with a message: #{msg}"
-in Errgonomic::Result::Err, Exception => e
+in Err(Exception => e)
   "Measurement produced an exception -- #{e.class}: #{e}"
 end
 ```
@@ -253,35 +257,37 @@ Errgonomic.with_ambiguous_downstream_errors do
 end
 ```
 
-Cross-type equality is the other pedantic check, and it is off by default because a quiet `false` is what every Ruby object answers. Turn it on and a comparison between a wrapper and a value that is not one raises `Errgonomic::TypeMismatchError`, naming both classes and the spelling to reach for:
+### Strict equality
+
+Cross-type equality is the other pedantic check, and there is no switch for it. A comparison between a wrapper and a value that is not one raises `Errgonomic::TypeMismatchError`, naming both classes and the spelling to reach for:
 
 ```ruby
-Errgonomic.strict_equality = true
-
 Some(5) == 5        # => raises Errgonomic::TypeMismatchError
 Some(5) != 5        # => raises
 Some(5).eql?(5)     # => raises
+Some(5) === 5       # => raises, so `case 5 when Some(5)` raises too
 None() == nil       # => raises, pointing at none?
 Ok(1) == 1          # => raises
 Some(1) == Ok(1)    # => raises: an Option and a Result are different containers
-Some(5) == Some(5)  # => true, as always
+Some(5) == Some(5)  # => true
+Some(5) == None()   # => false
 
 1 == Some(1)        # => raises, through Integer's coercion fallback
 nil == None()       # => false, quietly
 "a" == Some("a")    # => false, quietly
 ```
 
-A Result is cross-type for an Option and an Option is cross-type for a Result: they are different containers, neither is the other, and the message says to unwrap whichever one you meant. Two Options, or two Results, compare as they always did, and `hash` is untouched, so an Option stays usable as a Hash key with it on.
+A Result is cross-type for an Option and an Option is cross-type for a Result: they are different containers, neither is the other, and the message says to unwrap whichever one you meant. Two Options, or two Results, compare by variant and inner value, and `hash` is untouched, so an Option is a Hash key like any other value.
 
-Strictness fires when the wrapper is the receiver, and also when the left operand hands the comparison over: `1 == Some(1)` raises because `Integer#==` falls back to asking the right-hand side. `nil == None()` and `"a" == Some("a")` stay quietly false, because `NilClass` and `String` answer for themselves and never consult the operand. Put the wrapper on the left in a test if you want the check to reach every comparison. It is meant for a test suite or CI, not for production, and there is a block form for scoping it the way the ambiguous-error opt-out is scoped:
+The raise surface is uneven, because Ruby's collections reach equality three ways, and which side holds the wrapper decides what happens. The paragraph after this one gives the rule for `==` itself.
 
-```ruby
-Errgonomic.with_strict_equality do
-  assert_equal Some(5), book.pages
-end
-```
+- Pairwise `==`: `Array#include?`, `Array#index`, `Array#delete`, `Array#count`, `Array#==`, `Hash#==`, `case/when` and Minitest's `assert_equal` raise when the wrapper is the one asked: a member of the collection searched (`[Some(1)].include?(1)`), a `when` clause, or `assert_equal`'s expected value, which comes back as an error rather than a failure. With the wrapper on the other side the bare value answers. An Integer or another Numeric hands the comparison back, so `[1].include?(Some(1))` raises too; a String, a Symbol or `nil` answers `false` itself, so `["a"].include?(Some("a"))` and `case Some("a") when "a"` stay quiet, and `assert_equal "a", Some("a")` is an ordinary failure.
+- Pairwise `eql?`: `Array#-`, `Array#&` and `Array#|` compare member by member with `eql?` while the arrays are short, and a bare value's `eql?` never hands the comparison back. `[Some(1)] - [1]`, `[Some(1)] & [1]` and `[1] | [Some(1)]` raise; `[1] - [Some(1)]`, `[1] & [Some(1)]` and `[Some(1)] | [1]` stay quiet. Past Ruby's cutoff of 16 members they hash instead and stay quiet: `-` once both arrays are past it, `&` and `|` once either is.
+- Hashing: `Hash#[]`, `Set#include?`, `uniq` and `group_by` compare hash values first and ask `eql?` only of a candidate whose hash matches, so they stay quiet whichever side holds the wrapper.
 
-This gem runs its own Rails integration suite that way, as `rake test:strict`.
+Strict equality never answers wrong; it only sometimes fails to catch.
+
+Strictness fires when the wrapper is the receiver, and also when the left operand hands the comparison over: `1 == Some(1)` raises because `Integer#==` falls back to asking the right-hand side. `nil == Some(1)`, `nil == None()` and `"a" == Some("a")` stay quietly false, because `NilClass` and `String` answer for themselves and never consult the operand, and nothing in the gem can intercept them. Put the wrapper on the left in a test if you want the check to reach every comparison.
 
 ### Rails integration
 
@@ -409,13 +415,17 @@ It is available on every model, converted or not, because it lifts both ends one
 
 This is the register of where the gem leaves the Rust idiom, and why. ActiveRecord assumes things about accessors that a strict Rust `Option` cannot satisfy, so the integration carries five deliberate compromises, each one forced by a specific piece of ActiveRecord machinery rather than chosen. Everywhere else, treat a departure from Rust's `Option` semantics as a bug; these five are intended:
 
-1. `None#nil?` answers `true`, so ActiveRecord internals and ordinary `.nil?` checks treat an absent value as absent. Equality does not follow suit: `None() == nil` is still `false`. Nor does `Array#compact`, the common collection idiom for dropping absent members: it tests for the `nil` object, so it keeps a `None` where `reject(&:none?)` drops it.
+1. `None#nil?` answers `true`, so ActiveRecord internals and ordinary `.nil?` checks treat an absent value as absent. Equality does not follow suit: `None() == nil` raises `Errgonomic::TypeMismatchError`, pointing at `none?`, and `nil == None()` is `false`, answered by `NilClass`. Nor does `Array#compact`, the common collection idiom for dropping absent members: it tests for the `nil` object, so it keeps a `None` where `reject(&:none?)` drops it.
 2. `Some` delegates `persisted?` and `touch_later` to its record, so a `Some` can stand in for it where ActiveRecord reads an association back through its public reader, as a `belongs_to ..., touch: true` does after a save.
 3. An `Option` is unwrapped where a value enters ActiveRecord, above the column type in every case. Quoting and the predicate builder are patched so an `Option` passed into `where`/`quote` is unwrapped at the SQL boundary: `Some(v)` binds exactly as `v`, and `None()` as `nil`, so a hash condition asks for `IS NULL`. An array of Options unwraps too. An Option interpolated into raw SQL (`where("id = ?", opt)`) still raises, as it should. Assignment unwraps on the same principle. A singular association writer takes an Option of a record: `book.author = Some(author)` assigns it and `book.author = None()` clears the association, while a `Some` of the wrong class still raises `AssociationTypeMismatch`. An attribute writer takes an Option of a value, for every column type, and unwraps before the attribute is built, so `book.isbn = other.isbn` round-trips and nothing behind the reader ever holds a wrapper. A value that reaches the database without passing a writer unwraps where it enters ActiveRecord, above the column type in every case: in the ids and conditions `find` and `find_by` are given, on a class, a relation and an association alike; in the rows `update_all`, `insert_all` and `upsert` take; and in a default declared with `attribute :isbn, :string, default: Some('unassigned')`, unwrapped where it is written.
 4. `SomeValidator` asks whether a value is there at all, where `presence` asks whether it amounts to anything: `Some('')` passes `validates :x, some: true` and fails `presence: true`. It lifts what it is handed, so it asks the same question of any model, converted or not.
 5. Where the framework's own machinery reads a value raw, it gets one. Validation unwraps at `read_attribute_for_validation`, the seam every `EachValidator` fetches an attribute through; serialization at `read_attribute_for_serialization`, the seam every attribute in a payload is fetched through; and a form helper at `ActionView::Helpers::Tags::Base#value`, the seam every field reads its record through. So a standard validator weighs the value, a payload carries it and a form renders it, rather than the wrapper. A singular association with `accepts_nested_attributes_for` goes further and keeps its plain reader: nested attributes are assigned through the reader, and ActiveRecord asks whatever it finds there whether it is a new record. So does a reader a framework macro declares and then reads for itself, which is the associations behind `has_rich_text` and `has_one_attached` and the digest column `has_secure_password` hands to BCrypt.
 
 The set is closed. If a future integration appears to need a sixth compromise, that is a signal ActiveRecord is pushing back somewhere unmapped, and it warrants a design discussion rather than a quiet patch. `errgonomic_optional_except` and `errgonomic_serialize_none` are deliberately not on the list: they are configuration, an escape hatch that softens the all-or-nothing include for whatever conflict shows up next and a choice of how an absent value is written, rather than semantic exceptions.
+
+#### Known limitations
+
+A converted model with `belongs_to :writer, optional: true, touch: true` raises `Errgonomic::UnwrappedAccessError` (``undefined method `persisted?' for None``) when it saves or is destroyed with the association absent: on `create`, on any `update`, and on `destroy`. ActiveRecord's touch callback reads the association back through the public reader and asks `record && record.persisted?`, and a `None` is truthy and does not delegate `persisted?` the way a `Some` does. Leave the association unwrapped with `errgonomic_optional_except :writer`, which keeps `touch: true` working and hands back `nil` for an absent record.
 
 ## Development
 

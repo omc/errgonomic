@@ -2,6 +2,7 @@
 
 require 'set'
 require 'stringio'
+require_relative 'variant_name'
 
 module Errgonomic
   module Option
@@ -65,67 +66,97 @@ module Errgonomic
       end
 
       # An Option equals another Option of the same class with an equal inner
-      # value. Anything else, including nil and the raw inner value, is not
-      # equal: quietly false, never an error. Rust rejects Some(5) == 5 at
-      # compile time; Ruby cannot, and raising here would break the many
-      # places Ruby compares heterogeneous operands (Array#include?,
-      # assertion diffs, dirty tracking). Compare Options (opt == Some(5)) or
-      # test the inner value (opt.some_and? { |v| v == 5 }) instead.
+      # value. Comparing it with anything that is not an Option raises
+      # Errgonomic::TypeMismatchError, naming both sides and the spelling to
+      # reach for. Some(5) == 5 is the comparison Rust rejects at compile
+      # time, and a quiet false there is a silent wrong branch, the same
+      # failure as a wrapper written into a string. The raise reaches ==, !=,
+      # eql? and ===, and through them every collection operation that
+      # compares pairwise. Ruby's hashing compares hash values first and asks
+      # eql? only of a candidate whose hash matches, so a Hash lookup, a Set
+      # and uniq stay quiet with a wrong-typed key: strict equality never
+      # answers wrong, it only sometimes fails to catch. nil == Some(1) is
+      # answered by NilClass and cannot be intercepted.
       #
-      # None() == nil is likewise false: None is a value that represents
-      # absence, not an absence Ruby can see. (The Rails integration
-      # separately makes None#nil? answer true, as an ActiveRecord
-      # compromise; equality does not follow it.)
+      # None() == nil raises too: None is a value that represents absence,
+      # not an absence Ruby can see, and the message points at none?. (The
+      # Rails integration separately makes None#nil? answer true, as an
+      # ActiveRecord compromise; equality does not follow it.)
       #
       # @example
       #   Some(1) == Some(1) # => true
       #   Some(1) == Some(2) # => false
       #   Some(1) == None() # => false
       #   None() == None() # => true
-      #   Some(1) == 1 # => false
-      #   None() == nil # => false
       #
-      # @example strict equality makes a cross-type comparison an error
-      #   Errgonomic.with_strict_equality do
-      #     begin
-      #       Some(5) == 5
-      #     rescue Errgonomic::TypeMismatchError => e
-      #       e.class
-      #     end
-      #   end # => Errgonomic::TypeMismatchError
-      #   Errgonomic.with_strict_equality do
-      #     begin
-      #       Some(5) != 5
-      #     rescue Errgonomic::TypeMismatchError => e
-      #       e.message.include?("!=")
-      #     end
-      #   end # => true
-      #   Errgonomic.with_strict_equality { Some(5) == Some(5) } # => true
-      #   Errgonomic.with_strict_equality { Some(5) == None() } # => false
+      # @example a cross-type comparison is an error, never a quiet false
+      #   Some(5) == 5 # => raise Errgonomic::TypeMismatchError, "Errgonomic::Option::Some == Integer, which strict equality refuses.\nCompare Options (opt == Some(5)), test the inner value (opt.some_and? { |v| v == 5 }), or unwrap_or a fallback first."
+      #   Some(5) != 5 # => raise Errgonomic::TypeMismatchError, "Errgonomic::Option::Some != Integer, which strict equality refuses.\nCompare Options (opt == Some(5)), test the inner value (opt.some_and? { |v| v == 5 }), or unwrap_or a fallback first."
+      #   Some(5) === 5 # => raise Errgonomic::TypeMismatchError, "Errgonomic::Option::Some === Integer, which strict equality refuses.\nCompare Options (opt == Some(5)), test the inner value (opt.some_and? { |v| v == 5 }), or unwrap_or a fallback first."
+      #   Some(5) === Some(5) # => true
+      #   1 == Some(1) # => raise Errgonomic::TypeMismatchError, "Errgonomic::Option::Some == Integer, which strict equality refuses.\nCompare Options (opt == Some(1)), test the inner value (opt.some_and? { |v| v == 1 }), or unwrap_or a fallback first."
       #
       # @example a Result is another container, not another Option
-      #   Errgonomic.with_strict_equality do
-      #     begin
-      #       Some(1) == Ok(1)
-      #     rescue Errgonomic::TypeMismatchError => e
-      #       e.message.include?("different containers")
-      #     end
-      #   end # => true
+      #   Some(1) == Ok(1) # => raise Errgonomic::TypeMismatchError, "Errgonomic::Option::Some == Errgonomic::Result::Ok, which strict equality refuses.\nAn Option and a Result are different containers, and neither is the other. Unwrap the one you meant (opt.unwrap_or(nil) == res.unwrap_or(nil))."
       #
       # @example nil is another type, and absence here is the discriminant
-      #   Errgonomic.with_strict_equality do
-      #     begin
-      #       None() == nil
-      #     rescue Errgonomic::TypeMismatchError => e
-      #       e.message.include?("none?")
+      #   None() == nil # => raise Errgonomic::TypeMismatchError, "Errgonomic::Option::None == NilClass, which strict equality refuses.\nAbsence here is the discriminant: ask none?, or nil? under the Rails integration."
+      #
+      # @example the raise reaches every operation that compares pairwise
+      #   begin
+      #     [Some(1)].include?(1)
+      #   rescue Errgonomic::TypeMismatchError => e
+      #     e.class
+      #   end # => Errgonomic::TypeMismatchError
+      #   begin
+      #     [Some(1)] == [1]
+      #   rescue Errgonomic::TypeMismatchError => e
+      #     e.class
+      #   end # => Errgonomic::TypeMismatchError
+      #   begin
+      #     [Some(1), 1] - [1]
+      #   rescue Errgonomic::TypeMismatchError => e
+      #     e.class
+      #   end # => Errgonomic::TypeMismatchError
+      #   begin
+      #     { a: Some(1) } == { a: 1 }
+      #   rescue Errgonomic::TypeMismatchError => e
+      #     e.class
+      #   end # => Errgonomic::TypeMismatchError
+      #   begin
+      #     case 5
+      #     when Some(5) then :hit
       #     end
-      #   end # => true
+      #   rescue Errgonomic::TypeMismatchError => e
+      #     e.class
+      #   end # => Errgonomic::TypeMismatchError
+      #
+      # @example hashing compares hash values first, so these stay quiet
+      #   { Some(1) => :v }[1] # => nil
+      #   Set[Some(1)].include?(1) # => false
+      #   [Some(1), 1].uniq # => [Some(1), 1]
+      #
+      # @example a short array compares member by member with eql?, so the side the wrapper is on decides
+      #   [1] - [Some(1)] # => [1]
+      #   [Some(1)] | [1] # => [Some(1), 1]
+      #   [1] | [Some(1)] # => raise Errgonomic::TypeMismatchError, "Errgonomic::Option::Some eql? Integer, which strict equality refuses.\nCompare Options (opt == Some(1)), test the inner value (opt.some_and? { |v| v == 1 }), or unwrap_or a fallback first."
+      #
+      # @example nil and String answer for themselves, and never ask the Option
+      #   nil == Some(1) # => false
+      #   "a" == Some("a") # => false
       def ==(other)
         strict_equality!(other, '==')
         return false if self.class != other.class
         return true if none?
 
         value == other.value
+      end
+
+      # Object#=== is ==, so a `case value when Some(5)` and a pinned pattern
+      # reach the same check, named for the operator that was written.
+      def ===(other)
+        strict_equality!(other, '===')
+        self == other
       end
 
       # Hash-based collections (Hash keys, Set, uniq, group_by) use eql? and
@@ -140,28 +171,22 @@ module Errgonomic
       #   { Some(5) => 1 }[Some(5)] # => 1
       #   [Some(1), Some(1), None(), None()].uniq # => [Some(1), None()]
       #
-      # @example strict equality reaches eql?, and leaves hash alone
-      #   Errgonomic.with_strict_equality do
-      #     begin
-      #       Some(5).eql?(5)
-      #     rescue Errgonomic::TypeMismatchError => e
-      #       e.class
-      #     end
-      #   end # => Errgonomic::TypeMismatchError
-      #   Errgonomic.with_strict_equality { Some(5).hash == Some(5).hash } # => true
-      # Ruby derives != from ==, so a strict-equality message would name the
-      # operator the caller did not write.
-      def !=(other)
-        strict_equality!(other, '!=')
-        super
-      end
-
+      # @example a cross-type eql? raises as == does, and hash is untouched
+      #   Some(5).eql?(5) # => raise Errgonomic::TypeMismatchError, "Errgonomic::Option::Some eql? Integer, which strict equality refuses.\nCompare Options (opt == Some(5)), test the inner value (opt.some_and? { |v| v == 5 }), or unwrap_or a fallback first."
+      #   Some(5).hash == Some(5).hash # => true
       def eql?(other)
         strict_equality!(other, 'eql?')
         return false if self.class != other.class
         return true if none?
 
         value.eql?(other.value)
+      end
+
+      # Ruby derives != from ==, so a strict-equality message would name the
+      # operator the caller did not write.
+      def !=(other)
+        strict_equality!(other, '!=')
+        super
       end
 
       # @example
@@ -174,20 +199,65 @@ module Errgonomic
         [self.class, value].hash
       end
 
+      # The Rust shape: a Some deconstructs to its one payload and a None to
+      # nothing, so `in Some(v)` binds the value and `in None` matches. There
+      # is no deconstruct_keys, because a one-payload sum type has no named
+      # field; a Some wrapping a Hash nests as `in Some({id:})` through the
+      # Hash's own protocol.
+      #
       # @example
-      #   measurement = Errgonomic::Option::Some.new(1)
+      #   Some(1).deconstruct # => [1]
+      #   None().deconstruct # => []
+      #   Some(1).respond_to?(:deconstruct_keys) # => false
+      #
+      # @example a two-branch case/in with no else is exhaustive
+      #   measurement = Some(1)
       #   case measurement
-      #   in Errgonomic::Option::Some, value
-      #     "Measurement is #{measurement.value}"
-      #   in Errgonomic::Option::None
+      #   in Some(value)
+      #     "Measurement is #{value}"
+      #   in None
       #     "Measurement is not available"
-      #   else
-      #     "not matched"
       #   end # => "Measurement is 1"
+      #   case None()
+      #   in Some(value)
+      #     "Measurement is #{value}"
+      #   in None
+      #     "Measurement is not available"
+      #   end # => "Measurement is not available"
+      #
+      # @example the wrong type falls through to Ruby's own exhaustiveness check
+      #   begin
+      #     case 1
+      #     in Some(value) then value
+      #     in None then nil
+      #     end
+      #   rescue NoMatchingPatternError => e
+      #     [e.class, e.message]
+      #   end # => [NoMatchingPatternError, "1"]
+      #
+      # @example a Result that falls through carries a message that refuses to print
+      #   begin
+      #     case Ok(1)
+      #     in Some(value) then value
+      #     in None then nil
+      #     end
+      #   rescue NoMatchingPatternError => e
+      #     [e.class, (e.message rescue $!.class)]
+      #   end # => [NoMatchingPatternError, Errgonomic::SerializeError]
+      #
+      # @example patterns nest through the inner value's own protocol
+      #   case Ok(Some(1))
+      #   in Ok(Some(value)) then value
+      #   end # => 1
+      #   case Some({ id: 7, name: 'x' })
+      #   in Some({ id: }) then id
+      #   end # => 7
+      #   case Some(1)
+      #   in Errgonomic::Option::Some(value) then "bound #{value}"
+      #   else "not matched"
+      #   end # => "bound 1"
       def deconstruct
-        return [self, value] if some?
-
-        [Errgonomic::Option::None]
+        to_a
       end
 
       # Options order like Rust's: None sorts before any Some, and Somes
@@ -556,21 +626,24 @@ module Errgonomic
         block.call(value)
       end
 
-      # convert the option into a result where Some is Ok and None is Err
-      # @example
-      #   None().ok # => Err()
-      #   Some(1).ok # => Ok(1)
-      def ok
-        return Errgonomic::Result::Ok.new(value) if some?
-
-        Errgonomic::Result::Err.new
-      end
-
       # Transforms the option into a result, mapping Some(v) to Ok(v) and None to Err(err)
       #
       # @example
       #   None().ok_or("wow") # => Err("wow")
       #   Some(1).ok_or("such err") # => Ok(1)
+      #
+      # @example there is no bare ok: an Err always names its error
+      #   begin
+      #     None().ok
+      #   rescue NoMethodError => e
+      #     e.class
+      #   end # => Errgonomic::UnwrappedAccessError
+      #   begin
+      #     Some(1).ok
+      #   rescue NoMethodError => e
+      #     e.class
+      #   end # => Errgonomic::UnwrappedAccessError
+      #   Some(1).respond_to?(:ok) # => false
       def ok_or(err)
         return Errgonomic::Result::Ok.new(value) if some?
 
@@ -594,10 +667,10 @@ module Errgonomic
       # @example
       #   None().or(Some(1)) # => Some(1)
       #   Some(2).or(Some(3)) # => Some(2)
-      #   None().or(2) # => raise Errgonomic::ArgumentError.new, "other must be an Option, was Integer"
+      #   None().or(2) # => raise Errgonomic::ArgumentError, "other must be an Option, was Integer"
+      #   Some(1).or(2) # => raise Errgonomic::ArgumentError, "other must be an Option, was Integer"
       def or(other)
-        raise ArgumentError, "other must be an Option, was #{other.class.name}" unless other.is_a?(Any)
-
+        option_operand!(other)
         return self if some?
 
         other
@@ -620,12 +693,17 @@ module Errgonomic
         val
       end
 
-      # If self is Some, return the provided other Option.
+      # If self is Some, return the provided other Option. The operand is
+      # checked on both variants, so a None-heavy path still learns that it
+      # was handed a bare value.
       #
       # @example
       #   None().and(Some(1)) # => None()
       #   Some(2).and(Some(3)) # => Some(3)
+      #   Some(2).and(3) # => raise Errgonomic::ArgumentError, "other must be an Option, was Integer"
+      #   None().and(3) # => raise Errgonomic::ArgumentError, "other must be an Option, was Integer"
       def and(other)
+        option_operand!(other)
         return self if none?
 
         other
@@ -657,7 +735,10 @@ module Errgonomic
       #   None().zip(Some(1)) # => None()
       #   Some(1).zip(None()) # => None()
       #   Some(2).zip(Some(3)) # => Some([2, 3])
+      #   Some(1).zip(2) # => raise Errgonomic::ArgumentError, "other must be an Option, was Integer"
+      #   None().zip(2) # => raise Errgonomic::ArgumentError, "other must be an Option, was Integer"
       def zip(other)
+        option_operand!(other)
         return None() unless some? && other.some?
 
         Some([value, other.value])
@@ -671,7 +752,10 @@ module Errgonomic
       #   None().zip_with(Some(1)) { |a, b| a + b } # => None()
       #   Some(1).zip_with(None()) { |a, b| a + b } # => None()
       #   Some(2).zip_with(Some(3)) { |a, b| a + b } # => Some(5)
+      #   Some(1).zip_with(2) { |a, b| a + b } # => raise Errgonomic::ArgumentError, "other must be an Option, was Integer"
+      #   None().zip_with(2) { |a, b| a + b } # => raise Errgonomic::ArgumentError, "other must be an Option, was Integer"
       def zip_with(other, &block)
+        option_operand!(other)
         return None() unless some? && other.some?
 
         other = block.call(value, other.value)
@@ -767,8 +851,10 @@ module Errgonomic
       #   Some(:left).xor(Some(:right)) # => None()
       #   Some(:left).xor(None()) #=> Some(:left)
       #   None().xor(Some(:right)) #=> Some(:right)
-      #
+      #   Some(:left).xor(:right) # => raise Errgonomic::ArgumentError, "other must be an Option, was Symbol"
+      #   None().xor(:right) # => raise Errgonomic::ArgumentError, "other must be an Option, was Symbol"
       def xor(other)
+        option_operand!(other)
         return self if some? && other.none?
         return other if other.some? && none?
 
@@ -776,6 +862,14 @@ module Errgonomic
       end
 
       private
+
+      # Checked before the discriminant is consulted, so a None-heavy path
+      # learns about a bare operand as soon as a Some-heavy one would.
+      def option_operand!(other)
+        return if other.is_a?(Errgonomic::Option::Any)
+
+        raise Errgonomic::ArgumentError, "other must be an Option, was #{other.class.name}"
+      end
 
       def to_s_refusal
         "#{bounded_inspect} refuses to_s; use inspect for a log line, or unwrap_or / expect! for the value"
@@ -799,7 +893,6 @@ module Errgonomic
       end
 
       def strict_equality!(other, operator)
-        return unless Errgonomic.strict_equality?
         return if other.is_a?(Errgonomic::Option::Any)
 
         raise Errgonomic::TypeMismatchError,
@@ -830,11 +923,47 @@ module Errgonomic
 
     # Represent a value
     class Some < Any
-      attr_accessor :value
-
+      # A Some is a value, not a slot: nothing outside reads the inner value
+      # without handling the None branch, and nothing swaps it out from under
+      # another reference or a Hash key.
+      #
+      # @example the inner value is reached through a combinator, never a reader
+      #   begin
+      #     Some(1).value
+      #   rescue NoMethodError => e
+      #     e.class
+      #   end # => Errgonomic::UnwrappedAccessError
+      #   Some(1).respond_to?(:value) # => false
+      #
+      # @example a Some cannot be mutated through an alias
+      #   a = Some(1)
+      #   b = a
+      #   begin
+      #     b.value = 99
+      #   rescue NoMethodError => e
+      #     e.class
+      #   end # => Errgonomic::UnwrappedAccessError
+      #   a # => Some(1)
+      #   Some(1).frozen? # => true
+      #   begin
+      #     Some(1).instance_variable_set(:@value, 2)
+      #   rescue FrozenError => e
+      #     e.class
+      #   end # => FrozenError
+      #
+      # @example a Some keeps its place as a Hash key
+      #   k = Some(1)
+      #   h = { k => :v }
+      #   begin
+      #     k.value = 2
+      #   rescue NoMethodError
+      #     nil
+      #   end
+      #   h[k] # => :v
       def initialize(value)
         super()
         @value = value
+        freeze
       end
 
       def some?
@@ -856,10 +985,28 @@ module Errgonomic
       def inspect
         "Some(#{value.inspect})"
       end
+
+      protected
+
+      # Sibling instances read each other's value for equality, ordering and
+      # zip; nothing else does.
+      attr_reader :value
     end
 
     # Represent the absence of a value.
     class None < Any
+      # @example a None has no value to read, and says so the same way a Some does
+      #   begin
+      #     None().value
+      #   rescue NoMethodError => e
+      #     e.class
+      #   end # => Errgonomic::UnwrappedAccessError
+      #   None().frozen? # => true
+      def initialize
+        super
+        freeze
+      end
+
       def some?
         false
       end
@@ -886,3 +1033,8 @@ end
 def None
   Errgonomic::Option::None.new
 end
+
+# The variants under their short names, so a pattern reads as it does in
+# Rust: `in Some(v)`, `in None`.
+Errgonomic::VariantName.define(:Some, Errgonomic::Option::Some)
+Errgonomic::VariantName.define(:None, Errgonomic::Option::None)

@@ -923,12 +923,12 @@ class BugTest < Minitest::Test
   def test_an_unmatched_case_in_over_a_wrapper_has_a_message_that_refuses
     error = assert_raises(NoMatchingPatternError) do
       case Some(1)
-      in Errgonomic::Result::Ok, v then v
-      in Errgonomic::Result::Err, e then e
+      in Ok(v) then v
+      in Err(e) then e
       end
     end
     assert_raises(Errgonomic::SerializeError) { error.message }
-    unmatched = 'case Some(1); in Errgonomic::Result::Ok, v then v; in Errgonomic::Result::Err, e then e; end'
+    unmatched = 'case Some(1); in Ok(v) then v; in Err(e) then e; end'
 
     _, printed, = run_ruby(unmatched)
     assert_match(/in '<main>': NoMatchingPatternError$/, printed)
@@ -951,6 +951,163 @@ class BugTest < Minitest::Test
     assert_raises(Errgonomic::SerializeError) { logger.tagged('req-1') { logger.info(Some(1)) } }
     logger.tagged('req-1') { logger.info(Some(1).inspect) }
     assert_equal "Some(1)\n[req-1] Some(1)\n", io.string
+  end
+
+  # `return None` is how Rust spells a value, and in Ruby a bare variant name
+  # names the variant rather than building one. It refuses to become data
+  # wherever a wrapper does.
+  def test_a_bare_variant_name_refuses_to_become_a_string
+    [Some, None, Ok, Err].each do |variant|
+      assert_raises(Errgonomic::SerializeError) { variant.to_s }
+      assert_raises(Errgonomic::SerializeError) { "host-#{variant}.example" }
+      assert_raises(Errgonomic::SerializeError) { [variant].join(',') }
+      assert_raises(Errgonomic::SerializeError) { format('%s', variant) }
+      assert_raises(Errgonomic::SerializeError) { { tier: variant }.to_json }
+      assert_raises(Errgonomic::SerializeError) { { tier: variant }.as_json }
+      assert_raises(Errgonomic::SerializeError) { JSON.generate({ tier: variant }) }
+    end
+  end
+
+  # A boolean column casts any object that is not false to true, and an
+  # integer column casts one without to_i to nil, so every boundary an
+  # Option is unwrapped at refuses a bare name before a column type sees it.
+  def test_a_bare_variant_name_refuses_a_column_write
+    note = Note.create!(title: 'Bare')
+    [Some, None, Ok, Err].each do |variant|
+      %i[pinned title body meta rank score price due_on read_at].each do |column|
+        assert_raises(Errgonomic::SerializeError, column.to_s) { Note.create!(column => variant) }
+      end
+      %i[pinned title rank].each do |column|
+        assert_raises(Errgonomic::SerializeError) { note.update!(column => variant) }
+        assert_raises(Errgonomic::SerializeError) { Note.update_all(column => variant) }
+        assert_raises(Errgonomic::SerializeError) { Note.insert_all([{ column => variant }]) }
+        assert_raises(Errgonomic::SerializeError) { Note.where(column => variant).to_a }
+        assert_raises(Errgonomic::SerializeError) { Note.where(column => [variant, 1]).to_a }
+        assert_raises(Errgonomic::SerializeError) { Note.find_by(column => variant) }
+      end
+    end
+  end
+
+  def test_the_json_gem_alone_refuses_a_bare_variant_name
+    out, err, status = run_ruby(<<~CHILD, 'json')
+      [Some, None, Ok, Err].each do |variant|
+        puts({ tier: variant }.to_json)
+      rescue Errgonomic::SerializeError => e
+        puts e.class
+      end
+    CHILD
+
+    assert status.success?, err
+    assert_equal ['Errgonomic::SerializeError'] * 4, out.lines(chomp: true)
+  end
+
+  # A variant name still reads as the class it names wherever a pattern or a
+  # `case/when` asks it, and it inspects for a log line or a failure message.
+  def test_a_bare_variant_name_matches_and_inspects
+    matched = [Some(1), None(), Ok(Some(1)), Err(:x)].map do |subject|
+      case subject
+      in Some(v) then [:some, v]
+      in None then :none
+      in Ok(Some(v)) then [:ok_some, v]
+      in Err(e) then [:err, e]
+      end
+    end
+    assert_equal [[:some, 1], :none, [:ok_some, 1], %i[err x]], matched
+    assert_equal :err, (case Err(:x) when Ok then :ok when Err then :err end)
+    assert_equal 'Errgonomic::Option::None', None.inspect
+    failure = assert_raises(Minitest::Assertion) { assert_equal None, None() }
+    assert_includes failure.message, 'Errgonomic::Option::None'
+    assert_equal 'Errgonomic::Option::Some', Errgonomic::Option::Some.name
+    assert_equal 'Errgonomic::Result::Err', Errgonomic::Result::Err.inspect
+  end
+
+  # An application's own class under a variant name must not reopen the
+  # gem's, nor be replaced by it, in either load order.
+  def test_an_application_constant_under_a_variant_name_is_refused
+    { 'class None; def label = "app none"; end' => 'None is not a class',
+      'module Ok; end' => 'Ok is not a module' }.each do |definition, complaint|
+      _, err, status = run_ruby(definition)
+      refute status.success?, definition
+      assert_includes err, complaint
+    end
+
+    { 'class Ok; def self.status = 200; end' => 'Ok',
+      'Some = Struct.new(:value)' => 'Some' }.each do |definition, name|
+      _, err, status = run_ruby("#{definition}; require 'errgonomic'", preload: false)
+      refute status.success?, definition
+      assert_includes err, "#{name} is already defined"
+    end
+  end
+
+  # The gem loaded twice, through two paths to the same file, meets its own
+  # constants and keeps them.
+  def test_loading_the_gem_twice_keeps_its_variant_names
+    _, err, status = run_ruby("load 'errgonomic/option.rb'; load 'errgonomic/result.rb'")
+    assert status.success?, err
+  end
+
+  # Which collection operations raise on a cross-type comparison depends on
+  # how they compare and on which side holds the wrapper. The README lists
+  # them; this pins every case it names.
+  def test_the_strict_equality_surface_is_the_one_the_readme_lists
+    long = (100..120).to_a
+    tc = Class.new(Minitest::Test).new('surface')
+    one = 1
+    ints = [1]
+    strings = { a: 'a' }
+    surface = {
+      # Pairwise ==, with the wrapper as the member asked.
+      '[Some(1)].include?(1)' => [:raises, -> { [Some(1)].include?(1) }],
+      '[Some(1)].index(1)' => [:raises, -> { [Some(1)].index(1) }],
+      '[Some(1)].delete(1)' => [:raises, -> { [Some(1)].delete(1) }],
+      '[Some(1)].count(1)' => [:raises, -> { [Some(1)].count(1) }],
+      '[Some(1)] == [1]' => [:raises, -> { [Some(1)] == [1] }],
+      '{ a: Some(1) } == { a: 1 }' => [:raises, -> { { a: Some(1) } == { a: 1 } }],
+      'case 1 when Some(1)' => [:raises, -> { case one when Some(1) then :hit end }],
+      'assert_equal Some(1), 1' => [:raises, -> { tc.assert_equal Some(1), 1 }],
+      # Pairwise ==, with the wrapper on the other side: an Integer hands
+      # the comparison back, a String, a Symbol or nil answers for itself.
+      '[1].include?(Some(1))' => [:raises, -> { [1].include?(Some(1)) }],
+      '[1] == [Some(1)]' => [:raises, -> { ints == [Some(1)] }],
+      'case Some(1) when 1' => [:raises, -> { case Some(1) when 1 then :hit end }],
+      'assert_equal 1, Some(1)' => [:raises, -> { tc.assert_equal 1, Some(1) }],
+      "['a'].include?(Some('a'))" => [:quiet, -> { ['a'].include?(Some('a')) }],
+      '[:a].index(Some(:a))' => [:quiet, -> { [:a].index(Some(:a)) }],
+      '[nil].count(None())' => [:quiet, -> { [nil].count(None()) }],
+      "{ a: 'a' } == { a: Some('a') }" => [:quiet, -> { strings == { a: Some('a') } }],
+      "case Some('a') when 'a'" => [:quiet, -> { case Some('a') when 'a' then :hit end }],
+      "assert_equal 'a', Some('a')" => [:fails, -> { tc.assert_equal 'a', Some('a') }],
+      # Pairwise eql? on short arrays: only the wrapper's own eql? raises.
+      '[Some(1)] - [1]' => [:raises, -> { [Some(1)] - [1] }],
+      '[1] - [Some(1)]' => [:quiet, -> { [1] - [Some(1)] }],
+      '[Some(1)] & [1]' => [:raises, -> { [Some(1)] & [1] }],
+      '[1] & [Some(1)]' => [:quiet, -> { [1] & [Some(1)] }],
+      '[1] | [Some(1)]' => [:raises, -> { [1] | [Some(1)] }],
+      '[Some(1)] | [1]' => [:quiet, -> { [Some(1)] | [1] }],
+      # Past the cutoff they hash: both arrays for -, either one for & and |.
+      'long - short' => [:raises, -> { ([Some(1)] + long) - [1] }],
+      'long - long' => [:quiet, -> { ([Some(1)] + long) - ([1] + long) }],
+      'long & short' => [:quiet, -> { ([Some(1)] + long) & [1] }],
+      'long | short' => [:quiet, -> { ([1] + long) | [Some(1)] }],
+      # Hashing, whichever side holds the wrapper.
+      '{ Some(1) => :v }[1]' => [:quiet, -> { { Some(1) => :v }[1] }],
+      '{ 1 => :v }[Some(1)]' => [:quiet, -> { { 1 => :v }[Some(1)] }],
+      'Set[Some(1)].include?(1)' => [:quiet, -> { Set[Some(1)].include?(1) }],
+      'Set[1].include?(Some(1))' => [:quiet, -> { Set[1].include?(Some(1)) }],
+      '[Some(1), 1].uniq' => [:quiet, -> { [Some(1), 1].uniq }],
+      '[1, Some(1)].uniq' => [:quiet, -> { [1, Some(1)].uniq }],
+      '[Some(1), 1].group_by(&:itself)' => [:quiet, -> { [Some(1), 1].group_by(&:itself) }]
+    }
+    measured = surface.transform_values do |(_, call)|
+      call.call
+      :quiet
+    rescue Errgonomic::TypeMismatchError
+      :raises
+    rescue Minitest::Assertion
+      :fails
+    end
+
+    assert_equal surface.transform_values(&:first), measured
   end
 
   # ActionView's output buffer appends a value through to_s, so a bare
@@ -2251,10 +2408,10 @@ class BugTest < Minitest::Test
     end
   end
 
-  # Run a script in a fresh Ruby that loads errgonomic and the named
-  # libraries and nothing of this process's Rails.
-  def run_ruby(script, *libraries)
-    requires = [*libraries, 'errgonomic'].map { |library| "-r#{library}" }
+  # Run a script in a fresh Ruby that loads the named libraries, errgonomic
+  # unless told not to, and nothing of this process's Rails.
+  def run_ruby(script, *libraries, preload: true)
+    requires = [*libraries, *('errgonomic' if preload)].map { |library| "-r#{library}" }
     Open3.capture3(RbConfig.ruby, '-I', File.expand_path('../lib', __dir__), *requires, '-e', script)
   end
 

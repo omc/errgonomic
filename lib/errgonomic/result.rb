@@ -1,17 +1,36 @@
 # frozen_string_literal: true
 
+require_relative 'variant_name'
+
 module Errgonomic
   module Result
     # The base class for Result's Ok and Err class variants. We implement as
-    # much logic as possible here, and let Ok and Err handle their
-    # initialization and self identification.
+    # much logic as possible here, including construction, and let Ok and
+    # Err handle only their self identification.
     class Any
       include Comparable
 
-      attr_reader :value
-
+      # A Result is a value, not a slot: the inner value is reached through a
+      # combinator that handles the other variant, and nothing swaps it out
+      # from under another reference.
+      #
+      # @example
+      #   begin
+      #     Ok(1).value
+      #   rescue NoMethodError => e
+      #     e.class
+      #   end # => Errgonomic::UnwrappedAccessError
+      #   begin
+      #     Err(:x).value = :y
+      #   rescue NoMethodError => e
+      #     e.class
+      #   end # => Errgonomic::UnwrappedAccessError
+      #   Ok(1).respond_to?(:value) # => false
+      #   Ok(1).frozen? # => true
+      #   Err(:x).frozen? # => true
       def initialize(value)
         @value = value
+        freeze
       end
 
       # Results order like Rust's: Ok sorts before any Err, and same variants
@@ -88,7 +107,11 @@ module Errgonomic
         RUST_SPELLINGS.key?(name) || super
       end
 
-      # Equality comparison for Result objects is based on value not reference.
+      # A Result equals another Result of the same variant with an equal
+      # inner value. Comparing it with anything that is not a Result raises
+      # Errgonomic::TypeMismatchError, on the terms Option#== states: the
+      # raise reaches ==, !=, eql? and ===, hashing stays quiet, and a bare
+      # value on the left answers for itself.
       #
       # @param other [Object]
       #
@@ -96,39 +119,35 @@ module Errgonomic
       #   Ok(1) == Ok(1) # => true
       #   Ok(1) == Err(1) # => false
       #   Ok(1).object_id == Ok(1).object_id # => false
-      #   Ok(1) == 1 # => false
-      #   Err() == nil # => false
       #
-      # @example strict equality makes a cross-type comparison an error
-      #   Errgonomic.with_strict_equality do
-      #     begin
-      #       Ok(1) == 1
-      #     rescue Errgonomic::TypeMismatchError => e
-      #       e.class
-      #     end
+      # @example a cross-type comparison is an error, never a quiet false
+      #   Ok(1) == 1 # => raise Errgonomic::TypeMismatchError, "Errgonomic::Result::Ok == Integer, which strict equality refuses.\nCompare Results (res == Ok(1)), test the inner value (res.ok_and? { |v| v == 1 }), or unwrap_or a fallback first."
+      #   Ok(1) != 1 # => raise Errgonomic::TypeMismatchError, "Errgonomic::Result::Ok != Integer, which strict equality refuses.\nCompare Results (res == Ok(1)), test the inner value (res.ok_and? { |v| v == 1 }), or unwrap_or a fallback first."
+      #   Ok(1) === 1 # => raise Errgonomic::TypeMismatchError, "Errgonomic::Result::Ok === Integer, which strict equality refuses.\nCompare Results (res == Ok(1)), test the inner value (res.ok_and? { |v| v == 1 }), or unwrap_or a fallback first."
+      #   Err(:x) == nil # => raise Errgonomic::TypeMismatchError, "Errgonomic::Result::Err == NilClass, which strict equality refuses.\nCompare Results (res == Ok(nil)), test the inner value (res.ok_and? { |v| v == nil }), or unwrap_or a fallback first."
+      #   Ok(1) === Ok(1) # => true
+      #   begin
+      #     [Ok(1)].include?(1)
+      #   rescue Errgonomic::TypeMismatchError => e
+      #     e.class
       #   end # => Errgonomic::TypeMismatchError
-      #   Errgonomic.with_strict_equality { Ok(1) == Ok(1) } # => true
-      #   Errgonomic.with_strict_equality do
-      #     begin
-      #       Ok(1) != 1
-      #     rescue Errgonomic::TypeMismatchError => e
-      #       e.message.include?("!=")
-      #     end
-      #   end # => true
+      #   { Ok(1) => :v }[1] # => nil
+      #   nil == Err(:x) # => false
       #
       # @example an Option is another container, not another Result
-      #   Errgonomic.with_strict_equality do
-      #     begin
-      #       Ok(1) == Some(1)
-      #     rescue Errgonomic::TypeMismatchError => e
-      #       e.message.include?("different containers")
-      #     end
-      #   end # => true
+      #   Ok(1) == Some(1) # => raise Errgonomic::TypeMismatchError, "Errgonomic::Result::Ok == Errgonomic::Option::Some, which strict equality refuses.\nA Result and an Option are different containers, and neither is the other.\nUnwrap the one you meant (res.unwrap_or(nil) == opt.unwrap_or(nil))."
       def ==(other)
         strict_equality!(other, '==')
         return false if self.class != other.class
 
         value == other.value
+      end
+
+      # Object#=== is ==, so a `case value when Ok(1)` and a pinned pattern
+      # reach the same check, named for the operator that was written.
+      def ===(other)
+        strict_equality!(other, '===')
+        self == other
       end
 
       # Hash-based collections (Hash keys, Set, uniq, group_by) use eql? and
@@ -142,25 +161,19 @@ module Errgonomic
       #   { Ok(5) => 1 }[Ok(5)] # => 1
       #   [Err(:a), Err(:a)].uniq # => [Err(:a)]
       #
-      # @example strict equality reaches eql?, and leaves hash alone
-      #   Errgonomic.with_strict_equality do
-      #     begin
-      #       Ok(5).eql?(5)
-      #     rescue Errgonomic::TypeMismatchError => e
-      #       e.class
-      #     end
-      #   end # => Errgonomic::TypeMismatchError
-      #   Errgonomic.with_strict_equality { Ok(5).hash == Ok(5).hash } # => true
+      # @example a cross-type eql? raises as == does, and hash is untouched
+      #   Ok(5).eql?(5) # => raise Errgonomic::TypeMismatchError, "Errgonomic::Result::Ok eql? Integer, which strict equality refuses.\nCompare Results (res == Ok(5)), test the inner value (res.ok_and? { |v| v == 5 }), or unwrap_or a fallback first."
+      #   Ok(5).hash == Ok(5).hash # => true
+      def eql?(other)
+        strict_equality!(other, 'eql?')
+        self.class == other.class && value.eql?(other.value)
+      end
+
       # Ruby derives != from ==, so a strict-equality message would name the
       # operator the caller did not write.
       def !=(other)
         strict_equality!(other, '!=')
         super
-      end
-
-      def eql?(other)
-        strict_equality!(other, 'eql?')
-        self.class == other.class && value.eql?(other.value)
       end
 
       # @example
@@ -454,28 +467,86 @@ module Errgonomic
         pp.text(inspect)
       end
 
-      # @example simple pattern match with variable capture of the value
-      #   result = Errgonomic::Result::Ok.new(1)
-      #   case result
-      #   in Errgonomic::Result::Ok, value
+      # The Rust shape: each variant deconstructs to its one payload, so
+      # `in Ok(v)` binds the value and `in Err(e)` binds the error.
+      #
+      # @example
+      #   Ok(1).deconstruct # => [1]
+      #   Err(:x).deconstruct # => [:x]
+      #   Ok(1).respond_to?(:deconstruct_keys) # => false
+      #
+      # @example every Err carries an error, so `in Err()` matches none of them
+      #   case Err(:x)
+      #   in Err() then :empty
+      #   in Err(e) then e
+      #   end # => :x
+      #   case Err(:x)
+      #   in Err then :any_err
+      #   end # => :any_err
+      #   case Err(:x)
+      #   in Err(_) then :any_err
+      #   end # => :any_err
+      #
+      # @example an Err nested in an Ok matches through the Ok's payload
+      #   case Ok(Err(:boom))
+      #   in Ok(Err(e)) then e
+      #   end # => :boom
+      #   case Ok(Err(:boom))
+      #   in Ok(Err()) then :empty
+      #   in Ok(Err(_)) then :err_inside
+      #   end # => :err_inside
+      #   case Ok(Err(:boom))
+      #   in Ok(Ok(value)) then value
+      #   in Ok(Err) then :err_inside
+      #   end # => :err_inside
+      #
+      # @example a two-branch case/in with no else is exhaustive
+      #   case Ok(1)
+      #   in Ok(value)
       #     "Measurement is #{value}"
-      #   in Errgonomic::Result::Err, err
+      #   in Err(err)
       #     "Measurement is not available"
       #   end # => "Measurement is 1"
       #
-      # @example more advanced pattern match against the kind of value
-      #   result = Errgonomic::Result::Err.new(StandardError.new("nope"))
+      # @example the wrong type falls through to Ruby's own exhaustiveness check
+      #   begin
+      #     case :done
+      #     in Ok(value) then value
+      #     in Err(err) then err
+      #     end
+      #   rescue NoMatchingPatternError => e
+      #     [e.class, e.message]
+      #   end # => [NoMatchingPatternError, "done"]
+      #
+      # @example an Option that falls through carries a message that refuses to print
+      #   begin
+      #     case Some(1)
+      #     in Ok(value) then value
+      #     in Err(err) then err
+      #     end
+      #   rescue NoMatchingPatternError => e
+      #     [e.class, (e.message rescue $!.class)]
+      #   end # => [NoMatchingPatternError, Errgonomic::SerializeError]
+      #
+      # @example a pattern reaches the kind of value inside the variant
+      #   result = Err(StandardError.new("nope"))
       #   case result
-      #   in Errgonomic::Result::Ok, value
+      #   in Ok(value)
       #     "Measurement is #{value}"
-      #   in Errgonomic::Result::Err, String => msg
+      #   in Err(String => msg)
       #     "Measurement failed with a message: #{msg}"
-      #   in Errgonomic::Result::Err, Exception => e
+      #   in Err(Exception => e)
       #     "Measurement produced an exception -- #{e.class}: #{e}"
       #   end # => "Measurement produced an exception -- StandardError: nope"
       def deconstruct
-        [self, value]
+        [value]
       end
+
+      protected
+
+      # Sibling instances read each other's value for equality and ordering;
+      # nothing else does.
+      attr_reader :value
 
       private
 
@@ -491,7 +562,6 @@ module Errgonomic
       end
 
       def strict_equality!(other, operator)
-        return unless Errgonomic.strict_equality?
         return if other.is_a?(Errgonomic::Result::Any)
 
         raise Errgonomic::TypeMismatchError,
@@ -512,8 +582,6 @@ module Errgonomic
 
     # The Ok variant.
     class Ok < Any
-      attr_accessor :value
-
       # Ok is always ok
       #
       # @example
@@ -540,21 +608,23 @@ module Errgonomic
       end
     end
 
-    # The Err variant.
+    # The Err variant. It always carries an error, so unwrap_err! and a
+    # pattern variable bind what the caller put there.
+    #
+    # @example an Err without an error raises
+    #   Err(:e).unwrap_err! # => :e
+    #   Err() # => raise ArgumentError, "wrong number of arguments (given 0, expected 1)"
+    #   Errgonomic::Result::Err.new # => raise ArgumentError, "wrong number of arguments (given 0, expected 1)"
+    #
+    # @example Err(nil) is an ordinary Err that holds nil
+    #   Err(nil).inspect # => "Err(nil)"
+    #   Err(nil).unwrap_err! # => nil
+    #   Err(nil).deconstruct # => [nil]
+    #   case Err(nil)
+    #   in Ok(value) then [:ok, value]
+    #   in Err(e) then [:err, e]
+    #   end # => [:err, nil]
     class Err < Any
-      class Arbitrary; end
-
-      attr_accessor :value
-
-      # Err may be constructed without a value, if you want.
-      #
-      # @example
-      #   Err(:y).value # => :y
-      #   Err().value # => Arbitrary
-      def initialize(value = Arbitrary)
-        super(value)
-      end
-
       # Err is always err
       #
       # @example
@@ -571,15 +641,12 @@ module Errgonomic
         false
       end
 
-      # Render like Rust's Debug; a value-less Err renders bare.
+      # Render like Rust's Debug, delegating to the inner value's inspect.
       #
       # @example
       #   Err(:nope).inspect # => "Err(:nope)"
-      #   Err().inspect # => "Err()"
-      #   Errgonomic.with_strict_equality { Err(Some(1)).inspect } # => "Err(Some(1))"
+      #   Err(Some(1)).inspect # => "Err(Some(1))"
       def inspect
-        return 'Err()' if value.equal?(Arbitrary)
-
         "Err(#{value.inspect})"
       end
     end
@@ -621,6 +688,11 @@ def Ok(value)
 end
 
 # Global convenience method for constructing an Err result.
-def Err(value = Errgonomic::Result::Err::Arbitrary)
+def Err(value)
   Errgonomic::Result::Err.new(value)
 end
+
+# The variants under their short names, so a pattern reads as it does in
+# Rust: `in Ok(v)`, `in Err(e)`.
+Errgonomic::VariantName.define(:Ok, Errgonomic::Result::Ok)
+Errgonomic::VariantName.define(:Err, Errgonomic::Result::Err)

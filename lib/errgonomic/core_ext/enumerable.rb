@@ -46,7 +46,7 @@ module Enumerable
       end
       return None() if member.none?
 
-      values << member.value
+      member.tap_some { |value| values << value }
     end
     Some(values)
   end
@@ -87,7 +87,7 @@ module Enumerable
       end
       return member if member.err?
 
-      values << member.value
+      member.tap_ok { |value| values << value }
     end
     Ok(values)
   end
