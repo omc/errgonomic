@@ -258,12 +258,16 @@ module Errgonomic
       end
 
       # Return the inner value of an Err, else raise an exception when Ok.
+      # The message is the Ok's value as inspect renders it, bounded, so an
+      # Ok holding an Option or a Result still has a message to print.
       #
       # @example
-      #   Ok(1).unwrap_err! # => raise Errgonomic::UnwrapError, 1
+      #   Ok(1).unwrap_err! # => raise Errgonomic::UnwrapError, "1"
+      #   Ok(Some(1)).unwrap_err! # => raise Errgonomic::UnwrapError, "Some(1)"
+      #   Ok("a" * 100).unwrap_err! # => raise Errgonomic::UnwrapError, "\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa..."
       #   Err(:e).unwrap_err! # => :e
       def unwrap_err!
-        raise Errgonomic::UnwrapError, value unless err?
+        raise Errgonomic::UnwrapError.new(bounded_inspect(value), value) unless err?
 
         @value
       end
@@ -546,8 +550,8 @@ module Errgonomic
 
       # Name the value the caller failed to handle, bounded: an inspect of a
       # record or a long payload would bury the message carrying it.
-      def bounded_inspect
-        rendered = inspect
+      def bounded_inspect(object = self)
+        rendered = object.inspect
         rendered.length > 60 ? "#{rendered[0, 57]}..." : rendered
       end
 
