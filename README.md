@@ -111,7 +111,7 @@ Some(1).each.to_a                # => [1]
 
 `map` wraps whatever the block returns, as Rust's does, so a block that itself returns an Option gives `Some(Some(x))`. `and_then` is the spelling for that block.
 
-Options pattern match in the Rust shape. `Some`, `None`, `Ok` and `Err` are the class names as well as the constructors, so a pattern reads as it does in Rust:
+Options pattern match in the Rust shape. `Some`, `None`, `Ok` and `Err` name the variants in a pattern as well as building them, so a pattern reads as it does in Rust:
 
 ```ruby
 case measurement
@@ -122,7 +122,9 @@ in None
 end
 ```
 
-Leave the `else` off: the two branches cover an Option, and a value that is not one raises `NoMatchingPatternError` where an `else` would take it quietly. `deconstruct` answers `[value]` for a `Some` and `[]` for a `None`, the one-payload shape `Data.define(:value)` and Rust's tuple variants share, and there is no `deconstruct_keys`, because a one-payload sum type has no named field. Patterns nest through the inner value's own protocol instead: `in Ok(Some(value))` reaches through a Result, and `in Some({ id: })` reaches into a Hash a `Some` wraps.
+Leave the `else` off: the two branches cover an Option, and a value that is not one raises `NoMatchingPatternError` where an `else` would take it quietly. When that value is a Result, the error's message refuses to print; see the `case/in` note below. `deconstruct` answers `[value]` for a `Some` and `[]` for a `None`, the one-payload shape `Data.define(:value)` and Rust's tuple variants share, and there is no `deconstruct_keys`, because a one-payload sum type has no named field. Patterns nest through the inner value's own protocol instead: `in Ok(Some(value))` reaches through a Result, and `in Some({ id: })` reaches into a Hash a `Some` wraps.
+
+A bare `Some`, `None`, `Ok` or `Err`, without parentheses, is that name and not a value, where Rust's `return None` is one. It matches as the class it names in a pattern or a `case/when`, and refuses to stand in for a value: interpolation, `to_s`, `join`, `to_json` and `as_json` raise `Errgonomic::SerializeError` (`bare None names a variant for a pattern, not a value; build one with parentheses`), and so does handing one to an ActiveRecord attribute, a bulk write or a `where`. It is not a class, so `is_a?` takes the full name, `Errgonomic::Option::None`. An application constant of the same name collides loudly: defined before errgonomic loads, it stops the load with a `NameError`, and a `class None` or `module Ok` written after raises `TypeError` where it is written. Two forms get past that. `None = …` assigned after the load replaces the name with only Ruby's `already initialized constant` warning, and in a Rails application Zeitwerk skips an autoloaded `app/models/ok.rb` because `Ok` is already defined, so the first call on `Ok` raises `NoMethodError`.
 
 An unhandled Option refuses to leak into your output: `to_s`, `to_json` and `as_json` raise `Errgonomic::SerializeError`, so you handle the inner value deliberately rather than shipping `Some("...")` to a user. The refusal names what it was carrying (`cannot serialize an unwrapped Some("cell-a1b2")`), so a payload built out of many values says which one went unhandled; the value's `inspect` is bounded to 60 characters, with an ellipsis past that. The refusal covers `as_json` because Hash and Array serialization recurses through that method, and an Option nested in a payload would otherwise serialize as `{"value": ...}`. A converted ActiveRecord model is the one exception, at the model boundary: it unwraps each attribute as it serializes, so a record's own `as_json` says what an unconverted record's says. See [Rails integration](#rails-integration).
 
