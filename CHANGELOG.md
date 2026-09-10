@@ -6,7 +6,7 @@ This release reverts the 0.9.0 change that made `to_s` render an Option or a Res
 
 ### Upgrading from 0.9.0
 
-`to_s` on an Option or a Result raises `Errgonomic::SerializeError` again, so a string built from a wrapped reader fails where it is built rather than writing `Some("...")` or `None` into it. Code written against 0.9.0's rendering, whether a string interpolation, an `Array#join`, a `format`, a `String()` or a bare ERB `<%= %>`, has to take the value first: `unwrap_or` or `expect!` for the value, or `inspect` for a log line. A `rescue` that interpolates a wrapper into its message writes `inspect` there. A `rescue Errgonomic::SerializeError` written against 0.8.x still matches.
+`to_s` on an Option or a Result raises `Errgonomic::SerializeError` again, so a string built from a wrapped reader fails where it is built rather than writing `Some("...")` or `None` into it. Code written against 0.9.0's rendering, whether a string interpolation, an `Array#join`, a `format`, a `String()` or a bare ERB `<%= %>`, has to take the value first: `unwrap_or` or `expect!` for the value, or `inspect` for a log line. A `rescue` that interpolates a wrapper into its message writes `inspect` there. A `rescue Errgonomic::SerializeError` written against 0.8.x still matches. A `logger.info(opt)` that rendered through 0.9.0 still renders through a plain `Logger`, but raises under Rails' `TaggedLogging` once a tag such as `request_id` is set, so it can pass in tests and raise in production: write `logger.info(opt.inspect)`. The README's Option section describes this and a `case/in` that matches nothing on a wrapper, whose `NoMatchingPatternError` no longer prints its subject.
 
 ### Changes
 

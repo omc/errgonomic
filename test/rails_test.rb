@@ -941,6 +941,18 @@ class BugTest < Minitest::Test
     refute_includes reported + crashed, 'test_unmatched'
   end
 
+  # Logger's own formatter inspects a message that is not a String, and the
+  # tagged formatter interpolates it, so one call behaves two ways.
+  def test_a_tagged_logger_refuses_a_wrapper_that_a_plain_logger_inspects
+    io = StringIO.new
+    logger = ActiveSupport::TaggedLogging.new(ActiveSupport::Logger.new(io))
+
+    logger.info(Some(1))
+    assert_raises(Errgonomic::SerializeError) { logger.tagged('req-1') { logger.info(Some(1)) } }
+    logger.tagged('req-1') { logger.info(Some(1).inspect) }
+    assert_equal "Some(1)\n[req-1] Some(1)\n", io.string
+  end
+
   # ActionView's output buffer appends a value through to_s, so a bare
   # <%= reader %> of a Some raises rather than shipping Some(&quot;...&quot;)
   # to a page; the template wraps the refusal as its cause. A None answers
