@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+## [0.9.3] - 2026-09-10
+
+This release removes the public `value` slot from `Some`, `Ok` and `Err`, and freezes every instance, so an Option or a Result is the value the README already said it was.
+
+### Upgrading from 0.9.2
+
+`value` and `value=` are gone from `Some`, `Ok` and `Err`, and every instance is frozen. A read of `.value` becomes `unwrap_or(fallback)`, `expect!(message)`, `map`, `and_then` or a pattern, each of which names the other branch; a write of `.value=` becomes a new `Some(v)` assigned where the old one lived. A call to either now raises `Errgonomic::UnwrappedAccessError`, which is a `NoMethodError`, naming the combinators.
+
+### Changes
+
+- [Behavior change] `Some`, `Ok` and `Err` no longer expose `value` or `value=`, and every Option and Result is frozen on construction. The reader reached the inner value with no `None` branch, the writer mutated a wrapper through an alias and moved a Hash key out from under its own bucket, and the README already said an Option is a value rather than a slot. The reader is protected, for the sibling reads equality, ordering and `zip` need; a call from outside gets the combinator teaching `Errgonomic::UnwrappedAccessError` gives any other miss
+
 ## [0.9.2] - 2026-09-10
 
 This release makes `Option#and`, `#xor`, `#zip` and `#zip_with` check their operand the way `or` already did.
