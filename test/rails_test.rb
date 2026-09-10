@@ -896,6 +896,50 @@ class BugTest < Minitest::Test
     assert_raises(Errgonomic::SerializeError) { [Ok(5)].to_json }
   end
 
+  # A string is where a wrapper turns into data: a join builds an identity
+  # column, an interpolation a hostname, a format a node role. Each reaches
+  # the value through to_s, so each refuses.
+  def test_a_wrapper_refuses_to_become_a_string
+    assert_raises(Errgonomic::SerializeError) { [Some('org'), Some('metrics')].join('/') }
+    assert_raises(Errgonomic::SerializeError) { "#{None()}.us-east-1.example" }
+    assert_raises(Errgonomic::SerializeError) { "data_#{Some('hot')}" }
+    assert_raises(Errgonomic::SerializeError) { None().to_s.split(',') }
+    assert_raises(Errgonomic::SerializeError) { format('%s', Some(1)) }
+    assert_raises(Errgonomic::SerializeError) { String(Some(1)) }
+    assert_raises(Errgonomic::SerializeError) { "outcome: #{Ok(1)}" }
+    assert_raises(Errgonomic::SerializeError) { [Err(:x), Ok(1)].join(',') }
+    assert_raises(Errgonomic::SerializeError) { format('%s', Err(:x)) }
+    assert_raises(Errgonomic::SerializeError) { String(Ok(1)) }
+    assert_equal 'Some("hot")', Some('hot').inspect
+    assert_equal 'Err(:x)', Err(:x).inspect
+  end
+
+  # ActionView's output buffer appends a value through to_s, so a bare
+  # <%= reader %> of a Some raises rather than shipping Some(&quot;...&quot;)
+  # to a page; the template wraps the refusal as its cause. A None answers
+  # nil? under the Rails integration, and the buffer skips a nil before it
+  # asks for to_s, so a None renders as nothing.
+  def test_a_bare_erb_tag_refuses_a_wrapper
+    view = ActionView::Base.with_empty_template_cache.empty
+    [Some('visible'), Ok(1), Err(:x)].each do |wrapper|
+      error = assert_raises(ActionView::Template::Error) { view.render(inline: '<%= value %>', locals: { value: wrapper }) }
+      assert_kind_of Errgonomic::SerializeError, error.cause
+    end
+    assert_equal '', view.render(inline: '<%= value %>', locals: { value: None() })
+  end
+
+  # The json gem and ActiveSupport's as_json both stringify a Hash key with
+  # to_s, so the refusal reaches a key position through to_s alone.
+  def test_an_option_in_a_hash_key_refuses_to_serialize
+    assert_raises(Errgonomic::SerializeError) { { Some(1) => 2 }.to_json }
+    assert_raises(Errgonomic::SerializeError) { { Some(1) => 2 }.as_json }
+    assert_raises(Errgonomic::SerializeError) { JSON.generate({ Some(1) => 2 }) }
+    assert_raises(Errgonomic::SerializeError) { [1, 2, 3].group_by { |i| i.even? ? Some(:even) : None() }.to_json }
+    assert_raises(Errgonomic::SerializeError) { [1, 2, 3].group_by { |i| i.even? ? Some(:even) : None() }.as_json }
+    assert_raises(Errgonomic::SerializeError) { { Ok(1) => 2 }.as_json }
+    assert_raises(Errgonomic::SerializeError) { JSON.generate({ Err(:x) => 2 }) }
+  end
+
   # A conversion changes what a reader returns, not what a record serializes:
   # the payload has to match the model that was never converted, key for key.
   def test_a_converted_record_serializes_as_the_unconverted_one_does
