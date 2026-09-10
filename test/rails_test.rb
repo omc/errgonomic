@@ -1046,6 +1046,70 @@ class BugTest < Minitest::Test
     assert status.success?, err
   end
 
+  # Which collection operations raise on a cross-type comparison depends on
+  # how they compare and on which side holds the wrapper. The README lists
+  # them; this pins every case it names.
+  def test_the_strict_equality_surface_is_the_one_the_readme_lists
+    long = (100..120).to_a
+    tc = Class.new(Minitest::Test).new('surface')
+    one = 1
+    ints = [1]
+    strings = { a: 'a' }
+    surface = {
+      # Pairwise ==, with the wrapper as the member asked.
+      '[Some(1)].include?(1)' => [:raises, -> { [Some(1)].include?(1) }],
+      '[Some(1)].index(1)' => [:raises, -> { [Some(1)].index(1) }],
+      '[Some(1)].delete(1)' => [:raises, -> { [Some(1)].delete(1) }],
+      '[Some(1)].count(1)' => [:raises, -> { [Some(1)].count(1) }],
+      '[Some(1)] == [1]' => [:raises, -> { [Some(1)] == [1] }],
+      '{ a: Some(1) } == { a: 1 }' => [:raises, -> { { a: Some(1) } == { a: 1 } }],
+      'case 1 when Some(1)' => [:raises, -> { case one when Some(1) then :hit end }],
+      'assert_equal Some(1), 1' => [:raises, -> { tc.assert_equal Some(1), 1 }],
+      # Pairwise ==, with the wrapper on the other side: an Integer hands
+      # the comparison back, a String, a Symbol or nil answers for itself.
+      '[1].include?(Some(1))' => [:raises, -> { [1].include?(Some(1)) }],
+      '[1] == [Some(1)]' => [:raises, -> { ints == [Some(1)] }],
+      'case Some(1) when 1' => [:raises, -> { case Some(1) when 1 then :hit end }],
+      'assert_equal 1, Some(1)' => [:raises, -> { tc.assert_equal 1, Some(1) }],
+      "['a'].include?(Some('a'))" => [:quiet, -> { ['a'].include?(Some('a')) }],
+      '[:a].index(Some(:a))' => [:quiet, -> { [:a].index(Some(:a)) }],
+      '[nil].count(None())' => [:quiet, -> { [nil].count(None()) }],
+      "{ a: 'a' } == { a: Some('a') }" => [:quiet, -> { strings == { a: Some('a') } }],
+      "case Some('a') when 'a'" => [:quiet, -> { case Some('a') when 'a' then :hit end }],
+      "assert_equal 'a', Some('a')" => [:fails, -> { tc.assert_equal 'a', Some('a') }],
+      # Pairwise eql? on short arrays: only the wrapper's own eql? raises.
+      '[Some(1)] - [1]' => [:raises, -> { [Some(1)] - [1] }],
+      '[1] - [Some(1)]' => [:quiet, -> { [1] - [Some(1)] }],
+      '[Some(1)] & [1]' => [:raises, -> { [Some(1)] & [1] }],
+      '[1] & [Some(1)]' => [:quiet, -> { [1] & [Some(1)] }],
+      '[1] | [Some(1)]' => [:raises, -> { [1] | [Some(1)] }],
+      '[Some(1)] | [1]' => [:quiet, -> { [Some(1)] | [1] }],
+      # Past the cutoff they hash: both arrays for -, either one for & and |.
+      'long - short' => [:raises, -> { ([Some(1)] + long) - [1] }],
+      'long - long' => [:quiet, -> { ([Some(1)] + long) - ([1] + long) }],
+      'long & short' => [:quiet, -> { ([Some(1)] + long) & [1] }],
+      'long | short' => [:quiet, -> { ([1] + long) | [Some(1)] }],
+      # Hashing, whichever side holds the wrapper.
+      '{ Some(1) => :v }[1]' => [:quiet, -> { { Some(1) => :v }[1] }],
+      '{ 1 => :v }[Some(1)]' => [:quiet, -> { { 1 => :v }[Some(1)] }],
+      'Set[Some(1)].include?(1)' => [:quiet, -> { Set[Some(1)].include?(1) }],
+      'Set[1].include?(Some(1))' => [:quiet, -> { Set[1].include?(Some(1)) }],
+      '[Some(1), 1].uniq' => [:quiet, -> { [Some(1), 1].uniq }],
+      '[1, Some(1)].uniq' => [:quiet, -> { [1, Some(1)].uniq }],
+      '[Some(1), 1].group_by(&:itself)' => [:quiet, -> { [Some(1), 1].group_by(&:itself) }]
+    }
+    measured = surface.transform_values do |(_, call)|
+      call.call
+      :quiet
+    rescue Errgonomic::TypeMismatchError
+      :raises
+    rescue Minitest::Assertion
+      :fails
+    end
+
+    assert_equal surface.transform_values(&:first), measured
+  end
+
   # ActionView's output buffer appends a value through to_s, so a bare
   # <%= reader %> of a Some raises rather than shipping Some(&quot;...&quot;)
   # to a page; the template wraps the refusal as its cause. A None answers
