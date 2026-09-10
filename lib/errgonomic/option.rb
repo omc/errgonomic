@@ -594,10 +594,10 @@ module Errgonomic
       # @example
       #   None().or(Some(1)) # => Some(1)
       #   Some(2).or(Some(3)) # => Some(2)
-      #   None().or(2) # => raise Errgonomic::ArgumentError.new, "other must be an Option, was Integer"
+      #   None().or(2) # => raise Errgonomic::ArgumentError, "other must be an Option, was Integer"
+      #   Some(1).or(2) # => raise Errgonomic::ArgumentError, "other must be an Option, was Integer"
       def or(other)
-        raise ArgumentError, "other must be an Option, was #{other.class.name}" unless other.is_a?(Any)
-
+        option_operand!(other)
         return self if some?
 
         other
@@ -620,12 +620,17 @@ module Errgonomic
         val
       end
 
-      # If self is Some, return the provided other Option.
+      # If self is Some, return the provided other Option. The operand is
+      # checked on both variants, so a None-heavy path still learns that it
+      # was handed a bare value.
       #
       # @example
       #   None().and(Some(1)) # => None()
       #   Some(2).and(Some(3)) # => Some(3)
+      #   Some(2).and(3) # => raise Errgonomic::ArgumentError, "other must be an Option, was Integer"
+      #   None().and(3) # => raise Errgonomic::ArgumentError, "other must be an Option, was Integer"
       def and(other)
+        option_operand!(other)
         return self if none?
 
         other
@@ -657,7 +662,10 @@ module Errgonomic
       #   None().zip(Some(1)) # => None()
       #   Some(1).zip(None()) # => None()
       #   Some(2).zip(Some(3)) # => Some([2, 3])
+      #   Some(1).zip(2) # => raise Errgonomic::ArgumentError, "other must be an Option, was Integer"
+      #   None().zip(2) # => raise Errgonomic::ArgumentError, "other must be an Option, was Integer"
       def zip(other)
+        option_operand!(other)
         return None() unless some? && other.some?
 
         Some([value, other.value])
@@ -671,7 +679,10 @@ module Errgonomic
       #   None().zip_with(Some(1)) { |a, b| a + b } # => None()
       #   Some(1).zip_with(None()) { |a, b| a + b } # => None()
       #   Some(2).zip_with(Some(3)) { |a, b| a + b } # => Some(5)
+      #   Some(1).zip_with(2) { |a, b| a + b } # => raise Errgonomic::ArgumentError, "other must be an Option, was Integer"
+      #   None().zip_with(2) { |a, b| a + b } # => raise Errgonomic::ArgumentError, "other must be an Option, was Integer"
       def zip_with(other, &block)
+        option_operand!(other)
         return None() unless some? && other.some?
 
         other = block.call(value, other.value)
@@ -767,8 +778,10 @@ module Errgonomic
       #   Some(:left).xor(Some(:right)) # => None()
       #   Some(:left).xor(None()) #=> Some(:left)
       #   None().xor(Some(:right)) #=> Some(:right)
-      #
+      #   Some(:left).xor(:right) # => raise Errgonomic::ArgumentError, "other must be an Option, was Symbol"
+      #   None().xor(:right) # => raise Errgonomic::ArgumentError, "other must be an Option, was Symbol"
       def xor(other)
+        option_operand!(other)
         return self if some? && other.none?
         return other if other.some? && none?
 
@@ -776,6 +789,14 @@ module Errgonomic
       end
 
       private
+
+      # Checked before the discriminant is consulted, so a None-heavy path
+      # learns about a bare operand as soon as a Some-heavy one would.
+      def option_operand!(other)
+        return if other.is_a?(Errgonomic::Option::Any)
+
+        raise Errgonomic::ArgumentError, "other must be an Option, was #{other.class.name}"
+      end
 
       def to_s_refusal
         "#{bounded_inspect} refuses to_s; use inspect for a log line, or unwrap_or / expect! for the value"
