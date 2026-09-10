@@ -8,10 +8,27 @@ module Errgonomic
     class Any
       include Comparable
 
-      attr_reader :value
-
+      # A Result is a value, not a slot: the inner value is reached through a
+      # combinator that handles the other variant, and nothing swaps it out
+      # from under another reference.
+      #
+      # @example
+      #   begin
+      #     Ok(1).value
+      #   rescue NoMethodError => e
+      #     e.class
+      #   end # => Errgonomic::UnwrappedAccessError
+      #   begin
+      #     Err(:x).value = :y
+      #   rescue NoMethodError => e
+      #     e.class
+      #   end # => Errgonomic::UnwrappedAccessError
+      #   Ok(1).respond_to?(:value) # => false
+      #   Ok(1).frozen? # => true
+      #   Err().frozen? # => true
       def initialize(value)
         @value = value
+        freeze
       end
 
       # Results order like Rust's: Ok sorts before any Err, and same variants
@@ -477,6 +494,12 @@ module Errgonomic
         [self, value]
       end
 
+      protected
+
+      # Sibling instances read each other's value for equality and ordering;
+      # nothing else does.
+      attr_reader :value
+
       private
 
       def to_s_refusal
@@ -512,8 +535,6 @@ module Errgonomic
 
     # The Ok variant.
     class Ok < Any
-      attr_accessor :value
-
       # Ok is always ok
       #
       # @example
@@ -544,13 +565,11 @@ module Errgonomic
     class Err < Any
       class Arbitrary; end
 
-      attr_accessor :value
-
       # Err may be constructed without a value, if you want.
       #
       # @example
-      #   Err(:y).value # => :y
-      #   Err().value # => Arbitrary
+      #   Err(:y).unwrap_err! # => :y
+      #   Err().unwrap_err! # => Arbitrary
       def initialize(value = Arbitrary)
         super(value)
       end

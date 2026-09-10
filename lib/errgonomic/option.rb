@@ -178,7 +178,7 @@ module Errgonomic
       #   measurement = Errgonomic::Option::Some.new(1)
       #   case measurement
       #   in Errgonomic::Option::Some, value
-      #     "Measurement is #{measurement.value}"
+      #     "Measurement is #{value}"
       #   in Errgonomic::Option::None
       #     "Measurement is not available"
       #   else
@@ -851,11 +851,47 @@ module Errgonomic
 
     # Represent a value
     class Some < Any
-      attr_accessor :value
-
+      # A Some is a value, not a slot: nothing outside reads the inner value
+      # without handling the None branch, and nothing swaps it out from under
+      # another reference or a Hash key.
+      #
+      # @example the inner value is reached through a combinator, never a reader
+      #   begin
+      #     Some(1).value
+      #   rescue NoMethodError => e
+      #     e.class
+      #   end # => Errgonomic::UnwrappedAccessError
+      #   Some(1).respond_to?(:value) # => false
+      #
+      # @example a Some cannot be mutated through an alias
+      #   a = Some(1)
+      #   b = a
+      #   begin
+      #     b.value = 99
+      #   rescue NoMethodError => e
+      #     e.class
+      #   end # => Errgonomic::UnwrappedAccessError
+      #   a # => Some(1)
+      #   Some(1).frozen? # => true
+      #   begin
+      #     Some(1).instance_variable_set(:@value, 2)
+      #   rescue FrozenError => e
+      #     e.class
+      #   end # => FrozenError
+      #
+      # @example a Some keeps its place as a Hash key
+      #   k = Some(1)
+      #   h = { k => :v }
+      #   begin
+      #     k.value = 2
+      #   rescue NoMethodError
+      #     nil
+      #   end
+      #   h[k] # => :v
       def initialize(value)
         super()
         @value = value
+        freeze
       end
 
       def some?
@@ -877,10 +913,28 @@ module Errgonomic
       def inspect
         "Some(#{value.inspect})"
       end
+
+      protected
+
+      # Sibling instances read each other's value for equality, ordering and
+      # zip; nothing else does.
+      attr_reader :value
     end
 
     # Represent the absence of a value.
     class None < Any
+      # @example a None has no value to read, and says so the same way a Some does
+      #   begin
+      #     None().value
+      #   rescue NoMethodError => e
+      #     e.class
+      #   end # => Errgonomic::UnwrappedAccessError
+      #   None().frozen? # => true
+      def initialize
+        super
+        freeze
+      end
+
       def some?
         false
       end
