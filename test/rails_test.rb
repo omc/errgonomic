@@ -901,6 +901,7 @@ class BugTest < Minitest::Test
   # the value through to_s, so each refuses.
   def test_a_wrapper_refuses_to_become_a_string
     assert_raises(Errgonomic::SerializeError) { [Some('org'), Some('metrics')].join('/') }
+    assert_raises(Errgonomic::SerializeError) { [Some(1), None()].join(',') }
     assert_raises(Errgonomic::SerializeError) { "#{None()}.us-east-1.example" }
     assert_raises(Errgonomic::SerializeError) { "data_#{Some('hot')}" }
     assert_raises(Errgonomic::SerializeError) { None().to_s.split(',') }
@@ -938,6 +939,16 @@ class BugTest < Minitest::Test
     assert_raises(Errgonomic::SerializeError) { [1, 2, 3].group_by { |i| i.even? ? Some(:even) : None() }.as_json }
     assert_raises(Errgonomic::SerializeError) { { Ok(1) => 2 }.as_json }
     assert_raises(Errgonomic::SerializeError) { JSON.generate({ Err(:x) => 2 }) }
+  end
+
+  # A converted model's optional association keys a group_by by its reader,
+  # and the grouped payload is what reaches JSON.
+  def test_a_group_by_over_a_wrapped_reader_refuses_to_serialize
+    author = Author.create!(name: 'Ursula K. Le Guin')
+    Book.create!(title: 'The Dispossessed', author_id: author.id)
+    Book.create!(title: 'Anonymous')
+
+    assert_raises(Errgonomic::SerializeError) { Book.all.group_by(&:author).to_json }
   end
 
   # A conversion changes what a reader returns, not what a record serializes:
