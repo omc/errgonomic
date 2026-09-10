@@ -174,20 +174,55 @@ module Errgonomic
         [self.class, value].hash
       end
 
+      # The Rust shape: a Some deconstructs to its one payload and a None to
+      # nothing, so `in Some(v)` binds the value and `in None` matches. There
+      # is no deconstruct_keys, because a one-payload sum type has no named
+      # field; a Some wrapping a Hash nests as `in Some({id:})` through the
+      # Hash's own protocol.
+      #
       # @example
-      #   measurement = Errgonomic::Option::Some.new(1)
+      #   Some(1).deconstruct # => [1]
+      #   None().deconstruct # => []
+      #   Some(1).respond_to?(:deconstruct_keys) # => false
+      #
+      # @example a two-branch case/in with no else is exhaustive
+      #   measurement = Some(1)
       #   case measurement
-      #   in Errgonomic::Option::Some, value
+      #   in Some(value)
       #     "Measurement is #{value}"
-      #   in Errgonomic::Option::None
+      #   in None
       #     "Measurement is not available"
-      #   else
-      #     "not matched"
       #   end # => "Measurement is 1"
+      #   case None()
+      #   in Some(value)
+      #     "Measurement is #{value}"
+      #   in None
+      #     "Measurement is not available"
+      #   end # => "Measurement is not available"
+      #
+      # @example the wrong type falls through to Ruby's own exhaustiveness check
+      #   begin
+      #     case 1
+      #     in Some(value) then value
+      #     in None then nil
+      #     end
+      #   rescue NoMatchingPatternError => e
+      #     e.class
+      #   end # => NoMatchingPatternError
+      #
+      # @example patterns nest through the inner value's own protocol
+      #   case Ok(Some(1))
+      #   in Ok(Some(value)) then value
+      #   end # => 1
+      #   case Some({ id: 7, name: 'x' })
+      #   in Some({ id: }) then id
+      #   end # => 7
+      #   case Some(1)
+      #   in Errgonomic::Option::Some(value) then "bound #{value}"
+      #   else "not matched"
+      #   end # => "bound 1"
       def deconstruct
-        return [self, value] if some?
-
-        [Errgonomic::Option::None]
+        to_a
       end
 
       # Options order like Rust's: None sorts before any Some, and Somes
@@ -961,3 +996,8 @@ end
 def None
   Errgonomic::Option::None.new
 end
+
+# The variants under their short names, so a pattern reads as it does in
+# Rust: `in Some(v)`, `in None`.
+Some = Errgonomic::Option::Some
+None = Errgonomic::Option::None

@@ -111,16 +111,18 @@ Some(1).each.to_a                # => [1]
 
 `map` wraps whatever the block returns, as Rust's does, so a block that itself returns an Option gives `Some(Some(x))`. `and_then` is the spelling for that block.
 
-Options support pattern matching:
+Options pattern match in the Rust shape. `Some`, `None`, `Ok` and `Err` are the class names as well as the constructors, so a pattern reads as it does in Rust:
 
 ```ruby
 case measurement
-in Errgonomic::Option::Some, value
+in Some(value)
   "Measurement is #{value}"
-in Errgonomic::Option::None
+in None
   "Measurement is not available"
 end
 ```
+
+Leave the `else` off: the two branches cover an Option, and a value that is not one raises `NoMatchingPatternError` where an `else` would take it quietly. `deconstruct` answers `[value]` for a `Some` and `[]` for a `None`, the one-payload shape `Data.define(:value)` and Rust's tuple variants share, and there is no `deconstruct_keys`, because a one-payload sum type has no named field. Patterns nest through the inner value's own protocol instead: `in Ok(Some(value))` reaches through a Result, and `in Some({ id: })` reaches into a Hash a `Some` wraps.
 
 An unhandled Option refuses to leak into your output: `to_s`, `to_json` and `as_json` raise `Errgonomic::SerializeError`, so you handle the inner value deliberately rather than shipping `Some("...")` to a user. The refusal names what it was carrying (`cannot serialize an unwrapped Some("cell-a1b2")`), so a payload built out of many values says which one went unhandled; the value's `inspect` is bounded to 60 characters, with an ellipsis past that. The refusal covers `as_json` because Hash and Array serialization recurses through that method, and an Option nested in a payload would otherwise serialize as `{"value": ...}`. A converted ActiveRecord model is the one exception, at the model boundary: it unwraps each attribute as it serializes, so a record's own `as_json` says what an unconverted record's says. See [Rails integration](#rails-integration).
 
@@ -168,11 +170,11 @@ Results also pattern match, including against the kind of inner value:
 
 ```ruby
 case result
-in Errgonomic::Result::Ok, value
+in Ok(value)
   "Measurement is #{value}"
-in Errgonomic::Result::Err, String => msg
+in Err(String => msg)
   "Measurement failed with a message: #{msg}"
-in Errgonomic::Result::Err, Exception => e
+in Err(Exception => e)
   "Measurement produced an exception -- #{e.class}: #{e}"
 end
 ```
