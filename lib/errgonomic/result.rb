@@ -526,8 +526,6 @@ module Errgonomic
       #     "Measurement produced an exception -- #{e.class}: #{e}"
       #   end # => "Measurement produced an exception -- StandardError: nope"
       def deconstruct
-        return [] if value.equal?(Err::Arbitrary)
-
         [value]
       end
 
@@ -606,8 +604,6 @@ module Errgonomic
     #   Err.new # => raise ArgumentError, "wrong number of arguments (given 0, expected 1)"
     #   Errgonomic::Result::Err.new # => raise ArgumentError, "wrong number of arguments (given 0, expected 1)"
     class Err < Any
-      class Arbitrary; end
-
       # Err is always err
       #
       # @example
@@ -630,8 +626,6 @@ module Errgonomic
       #   Err(:nope).inspect # => "Err(:nope)"
       #   Err(Some(1)).inspect # => "Err(Some(1))"
       def inspect
-        return 'Err()' if value.equal?(Arbitrary)
-
         "Err(#{value.inspect})"
       end
     end
