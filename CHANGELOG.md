@@ -1,5 +1,19 @@
 ## [Unreleased]
 
+## [0.10.0] - 2026-09-10
+
+This release gives `deconstruct` the Rust shape and names the four variants at top level, so a pattern reads as `in Some(v)`.
+
+### Upgrading from 0.9.3
+
+`deconstruct` answers `[value]` for a `Some`, an `Ok` and an `Err` and `[]` for a `None`, so a pattern written against 0.9.x's `[self, value]` has to change shape: `in Errgonomic::Option::Some, v` becomes `in Some(v)`, `in Errgonomic::Result::Err, String => msg` becomes `in Err(String => msg)`, and `in Errgonomic::Option::None` stays as it is or becomes `in None`. `Some`, `None`, `Ok` and `Err` are now top-level constants for the four classes as well as constructors. An application that defines its own constant under one of those names has to rename it.
+
+### Changes
+
+- [Behavior change] `deconstruct` answers `[value]` for a `Some`, an `Ok` and an `Err` and `[]` for a `None`, the one-payload shape `Data.define(:value)` and Rust's tuple variants share, where 0.9.x answered `[self, value]` and `[None]`. `in Some(v)` binds the value, `in Ok(Some(v))` nests, a two-branch `case/in` with no `else` is exhaustive, and a wrong type reaches `NoMatchingPatternError`. There is no `deconstruct_keys`: a one-payload sum type has no named field, and a `Some` around a Hash nests as `in Some({ id: })` through the Hash's own protocol
+- A value-less `Err()` deconstructs to `[]`, so `in Err` and `in Err()` match it and `in Err(e)` matches only an `Err` that carries a value. The sentinel `Err()` holds in place of a value is internal, and a pattern variable must never bind it
+- `Some`, `None`, `Ok` and `Err` are defined as top-level constants for the four classes, beside the constructors of the same name, so a pattern reads as it does in Rust. Rails defines none of the four
+
 ## [0.9.3] - 2026-09-10
 
 This release removes the public `value` slot from `Some`, `Ok` and `Err`, and freezes every instance, so an Option or a Result is the value the README already said it was.
