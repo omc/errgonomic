@@ -241,12 +241,16 @@ module Errgonomic
       end
 
       # Return the inner value of an Err, else raise an exception when Ok.
+      # The message is the Ok's value as inspect renders it, bounded, so an
+      # Ok holding an Option or a Result still has a message to print.
       #
       # @example
-      #   Ok(1).unwrap_err! # => raise Errgonomic::UnwrapError, 1
+      #   Ok(1).unwrap_err! # => raise Errgonomic::UnwrapError, "1"
+      #   Ok(Some(1)).unwrap_err! # => raise Errgonomic::UnwrapError, "Some(1)"
+      #   Ok("a" * 100).unwrap_err! # => raise Errgonomic::UnwrapError, "\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa..."
       #   Err(:e).unwrap_err! # => :e
       def unwrap_err!
-        raise Errgonomic::UnwrapError, value unless err?
+        raise Errgonomic::UnwrapError.new(bounded_inspect(value), value) unless err?
 
         @value
       end
@@ -405,18 +409,22 @@ module Errgonomic
         Err(block.call(value))
       end
 
-      # Render as inspect does. Rust gives Result a Debug and no Display, so
-      # refusing was faithful, but a to_s that raises replaces the real
-      # exception while a rescue builds its log line, and the rendered form
-      # says plainly that a wrapper arrived where a value was meant.
+      # Refuse to render as a String. Rust gives Result a Debug and no
+      # Display: a wrapper that reaches a string went unhandled, and a string
+      # is where it turns into data, a hostname, a hash key or a page. The
+      # refusal names the value and says how to log it or take it.
       #
       # @example
-      #   Ok(1).to_s # => "Ok(1)"
-      #   Err(:nope).to_s # => "Err(:nope)"
-      #   Err().to_s # => "Err()"
-      #   "outcome: #{Ok(1)}" # => "outcome: Ok(1)"
+      #   Ok(1).to_s # => raise Errgonomic::SerializeError, "Ok(1) refuses to_s; use inspect for a log line, or unwrap_or / expect! for the value"
+      #   Err(:nope).to_s # => raise Errgonomic::SerializeError, "Err(:nope) refuses to_s; use inspect for a log line, or unwrap_or / expect! for the value"
+      #   "outcome: #{Ok(1)}" # => raise Errgonomic::SerializeError, "Ok(1) refuses to_s; use inspect for a log line, or unwrap_or / expect! for the value"
+      #   [Ok(1), Err(:x)].join(",") # => raise Errgonomic::SerializeError, "Ok(1) refuses to_s; use inspect for a log line, or unwrap_or / expect! for the value"
+      #   format("%s", Err(:x)) # => raise Errgonomic::SerializeError, "Err(:x) refuses to_s; use inspect for a log line, or unwrap_or / expect! for the value"
+      #   String(Ok(1)) # => raise Errgonomic::SerializeError, "Ok(1) refuses to_s; use inspect for a log line, or unwrap_or / expect! for the value"
+      #   Err("a" * 100).to_s # => raise Errgonomic::SerializeError, "Err(\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa... refuses to_s; use inspect for a log line, or unwrap_or / expect! for the value"
+      #   Err(:nope).inspect # => "Err(:nope)"
       def to_s
-        inspect
+        raise Errgonomic::SerializeError, to_s_refusal
       end
 
       # Refuse to serialize an unwrapped Result as JSON. Not only should we
@@ -470,6 +478,17 @@ module Errgonomic
       end
 
       private
+
+      def to_s_refusal
+        "#{bounded_inspect} refuses to_s; use inspect for a log line, or unwrap_or / expect! for the value"
+      end
+
+      # Name the value the caller failed to handle, bounded: an inspect of a
+      # record or a long payload would bury the message carrying it.
+      def bounded_inspect(object = self)
+        rendered = object.inspect
+        rendered.length > 60 ? "#{rendered[0, 57]}..." : rendered
+      end
 
       def strict_equality!(other, operator)
         return unless Errgonomic.strict_equality?

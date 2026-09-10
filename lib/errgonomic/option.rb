@@ -678,18 +678,22 @@ module Errgonomic
         Some(other)
       end
 
-      # Render as inspect does. Rust gives Option a Debug and no Display, so
-      # refusing was faithful, but a to_s that raises replaces the real
-      # exception while a rescue builds its log line, and the rendered form
-      # says plainly that a wrapper arrived where a value was meant.
+      # Refuse to render as a String. Rust gives Option a Debug and no
+      # Display: a wrapper that reaches a string went unhandled, and a string
+      # is where it turns into data, a hostname, a hash key or a page. The
+      # refusal names the value and says how to log it or take it.
       #
       # @example
-      #   Some(1).to_s # => "Some(1)"
-      #   Some("x").to_s # => "Some(\"x\")"
-      #   None().to_s # => "None"
-      #   "value: #{Some(1)}" # => "value: Some(1)"
+      #   Some(1).to_s # => raise Errgonomic::SerializeError, "Some(1) refuses to_s; use inspect for a log line, or unwrap_or / expect! for the value"
+      #   None().to_s # => raise Errgonomic::SerializeError, "None refuses to_s; use inspect for a log line, or unwrap_or / expect! for the value"
+      #   "value: #{Some(1)}" # => raise Errgonomic::SerializeError, "Some(1) refuses to_s; use inspect for a log line, or unwrap_or / expect! for the value"
+      #   [Some("org"), Some("metrics")].join("/") # => raise Errgonomic::SerializeError, "Some(\"org\") refuses to_s; use inspect for a log line, or unwrap_or / expect! for the value"
+      #   format("%s", None()) # => raise Errgonomic::SerializeError, "None refuses to_s; use inspect for a log line, or unwrap_or / expect! for the value"
+      #   String(Some(1)) # => raise Errgonomic::SerializeError, "Some(1) refuses to_s; use inspect for a log line, or unwrap_or / expect! for the value"
+      #   Some("a" * 100).to_s # => raise Errgonomic::SerializeError, "Some(\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa... refuses to_s; use inspect for a log line, or unwrap_or / expect! for the value"
+      #   Some(1).inspect # => "Some(1)"
       def to_s
-        inspect
+        raise Errgonomic::SerializeError, to_s_refusal
       end
 
       # Refuse to serialize an unwrapped Option as JSON. Not only should we
@@ -773,12 +777,19 @@ module Errgonomic
 
       private
 
+      def to_s_refusal
+        "#{bounded_inspect} refuses to_s; use inspect for a log line, or unwrap_or / expect! for the value"
+      end
+
+      def serialize_refusal
+        "cannot serialize an unwrapped #{bounded_inspect}"
+      end
+
       # Name the value the caller failed to handle, bounded: an inspect of a
       # record or a long payload would bury the message carrying it.
-      def serialize_refusal
+      def bounded_inspect
         rendered = inspect
-        rendered = "#{rendered[0, 57]}..." if rendered.length > 60
-        "cannot serialize an unwrapped #{rendered}"
+        rendered.length > 60 ? "#{rendered[0, 57]}..." : rendered
       end
 
       def presence_nudge(from, to)

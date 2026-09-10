@@ -14,6 +14,8 @@ require 'logger'
 require 'stringio'
 require 'tmpdir'
 require 'fileutils'
+require 'open3'
+require 'rbconfig'
 
 require_relative '../lib/errgonomic/rails'
 
@@ -894,6 +896,116 @@ class BugTest < Minitest::Test
     assert_raises(Errgonomic::SerializeError) { Ok(5).as_json }
     assert_raises(Errgonomic::SerializeError) { { a: Err(5) }.to_json }
     assert_raises(Errgonomic::SerializeError) { [Ok(5)].to_json }
+  end
+
+  # A string is where a wrapper turns into data: a join builds an identity
+  # column, an interpolation a hostname, a format a node role. Each reaches
+  # the value through to_s, so each refuses.
+  def test_a_wrapper_refuses_to_become_a_string
+    assert_raises(Errgonomic::SerializeError) { [Some('org'), Some('metrics')].join('/') }
+    assert_raises(Errgonomic::SerializeError) { [Some(1), None()].join(',') }
+    assert_raises(Errgonomic::SerializeError) { "#{None()}.us-east-1.example" }
+    assert_raises(Errgonomic::SerializeError) { "data_#{Some('hot')}" }
+    assert_raises(Errgonomic::SerializeError) { None().to_s.split(',') }
+    assert_raises(Errgonomic::SerializeError) { format('%s', Some(1)) }
+    assert_raises(Errgonomic::SerializeError) { String(Some(1)) }
+    assert_raises(Errgonomic::SerializeError) { "outcome: #{Ok(1)}" }
+    assert_raises(Errgonomic::SerializeError) { [Err(:x), Ok(1)].join(',') }
+    assert_raises(Errgonomic::SerializeError) { format('%s', Err(:x)) }
+    assert_raises(Errgonomic::SerializeError) { String(Ok(1)) }
+    assert_equal 'Some("hot")', Some('hot').inspect
+    assert_equal 'Err(:x)', Err(:x).inspect
+  end
+
+  # A case/in with several branches and none matching raises
+  # NoMatchingPatternError with the subject itself as its message, so
+  # printing it reaches to_s. The README says what that looks like.
+  def test_an_unmatched_case_in_over_a_wrapper_has_a_message_that_refuses
+    error = assert_raises(NoMatchingPatternError) do
+      case Some(1)
+      in Errgonomic::Result::Ok, v then v
+      in Errgonomic::Result::Err, e then e
+      end
+    end
+    assert_raises(Errgonomic::SerializeError) { error.message }
+    unmatched = 'case Some(1); in Errgonomic::Result::Ok, v then v; in Errgonomic::Result::Err, e then e; end'
+
+    _, printed, = run_ruby(unmatched)
+    assert_match(/in '<main>': NoMatchingPatternError$/, printed)
+    refute_includes printed, 'Some(1)'
+
+    suite = "class T < Minitest::Test; def test_unmatched = #{unmatched}; end"
+    reported, crashed, = run_ruby(suite, 'minitest/autorun')
+    assert_includes crashed, 'Some(1) refuses to_s'
+    refute_match(/\d+ runs, \d+ assertions/, reported)
+    refute_includes reported + crashed, 'test_unmatched'
+  end
+
+  # Logger's own formatter inspects a message that is not a String, and the
+  # tagged formatter interpolates it, so one call behaves two ways.
+  def test_a_tagged_logger_refuses_a_wrapper_that_a_plain_logger_inspects
+    io = StringIO.new
+    logger = ActiveSupport::TaggedLogging.new(ActiveSupport::Logger.new(io))
+
+    logger.info(Some(1))
+    assert_raises(Errgonomic::SerializeError) { logger.tagged('req-1') { logger.info(Some(1)) } }
+    logger.tagged('req-1') { logger.info(Some(1).inspect) }
+    assert_equal "Some(1)\n[req-1] Some(1)\n", io.string
+  end
+
+  # ActionView's output buffer appends a value through to_s, so a bare
+  # <%= reader %> of a Some raises rather than shipping Some(&quot;...&quot;)
+  # to a page; the template wraps the refusal as its cause. A None answers
+  # nil? under the Rails integration, and the buffer skips a nil before it
+  # asks for to_s, so a None renders as nothing.
+  def test_a_bare_erb_tag_refuses_a_wrapper
+    view = ActionView::Base.with_empty_template_cache.empty
+    [Some('visible'), Ok(1), Err(:x)].each do |wrapper|
+      error = assert_raises(ActionView::Template::Error) { view.render(inline: '<%= value %>', locals: { value: wrapper }) }
+      assert_kind_of Errgonomic::SerializeError, error.cause
+    end
+    assert_equal '', view.render(inline: '<%= value %>', locals: { value: None() })
+  end
+
+  # The json gem and ActiveSupport's as_json both stringify a Hash key with
+  # to_s, so the refusal reaches a key position through to_s alone.
+  def test_an_option_in_a_hash_key_refuses_to_serialize
+    assert_raises(Errgonomic::SerializeError) { { Some(1) => 2 }.as_json }
+    assert_raises(Errgonomic::SerializeError) { JSON.generate({ Some(1) => 2 }) }
+    assert_raises(Errgonomic::SerializeError) { [1, 2, 3].group_by { |i| i.even? ? Some(:even) : None() }.as_json }
+    assert_raises(Errgonomic::SerializeError) { { Ok(1) => 2 }.as_json }
+    assert_raises(Errgonomic::SerializeError) { JSON.generate({ Err(:x) => 2 }) }
+  end
+
+  # A converted model's optional association keys a group_by by its reader,
+  # and the grouped payload is what reaches JSON.
+  def test_a_group_by_over_a_wrapped_reader_refuses_to_serialize
+    author = Author.create!(name: 'Ursula K. Le Guin')
+    Book.create!(title: 'The Dispossessed', author_id: author.id)
+    Book.create!(title: 'Anonymous')
+
+    assert_raises(Errgonomic::SerializeError) { Book.all.group_by(&:author).to_json }
+  end
+
+  # ActiveSupport's to_json reaches a key through as_json, which refuses
+  # whatever to_s does, so the json gem's own key path runs in a child
+  # process that loads the json gem and nothing of ActiveSupport.
+  def test_the_json_gem_alone_refuses_an_option_in_a_hash_key
+    script = <<~CHILD
+      [-> { { Some(1) => 2 }.to_json },
+       -> { [1, 2, 3].group_by { |i| i.even? ? Some(:even) : None() }.to_json }].each do |call|
+        puts call.call
+      rescue Errgonomic::SerializeError => e
+        puts e.message
+      end
+      puts defined?(ActiveSupport).inspect
+    CHILD
+    out, err, status = run_ruby(script, 'json')
+
+    assert status.success?, err
+    assert_equal ['Some(1) refuses to_s; use inspect for a log line, or unwrap_or / expect! for the value',
+                  'None refuses to_s; use inspect for a log line, or unwrap_or / expect! for the value',
+                  'nil'], out.lines(chomp: true)
   end
 
   # A conversion changes what a reader returns, not what a record serializes:
@@ -2137,6 +2249,13 @@ class BugTest < Minitest::Test
     ActionView::Base.empty.form_with(model: record, url: '/notes', scope: :note) do |form|
       form.text_field(:title) + form.check_box(:pinned) + form.datetime_local_field(:read_at)
     end
+  end
+
+  # Run a script in a fresh Ruby that loads errgonomic and the named
+  # libraries and nothing of this process's Rails.
+  def run_ruby(script, *libraries)
+    requires = [*libraries, 'errgonomic'].map { |library| "-r#{library}" }
+    Open3.capture3(RbConfig.ruby, '-I', File.expand_path('../lib', __dir__), *requires, '-e', script)
   end
 
   def capture_stderr
