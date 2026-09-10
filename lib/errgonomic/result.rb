@@ -471,27 +471,45 @@ module Errgonomic
         pp.text(inspect)
       end
 
-      # @example simple pattern match with variable capture of the value
-      #   result = Errgonomic::Result::Ok.new(1)
-      #   case result
-      #   in Errgonomic::Result::Ok, value
+      # The Rust shape: each variant deconstructs to its one payload, so
+      # `in Ok(v)` binds the value and `in Err(e)` binds the error.
+      #
+      # @example
+      #   Ok(1).deconstruct # => [1]
+      #   Err(:e).deconstruct # => [:e]
+      #   Err().deconstruct # => [Errgonomic::Result::Err::Arbitrary]
+      #   Ok(1).respond_to?(:deconstruct_keys) # => false
+      #
+      # @example a two-branch case/in with no else is exhaustive
+      #   case Ok(1)
+      #   in Ok(value)
       #     "Measurement is #{value}"
-      #   in Errgonomic::Result::Err, err
+      #   in Err(err)
       #     "Measurement is not available"
       #   end # => "Measurement is 1"
       #
-      # @example more advanced pattern match against the kind of value
-      #   result = Errgonomic::Result::Err.new(StandardError.new("nope"))
+      # @example the wrong type falls through to Ruby's own exhaustiveness check
+      #   begin
+      #     case Some(1)
+      #     in Ok(value) then value
+      #     in Err(err) then err
+      #     end
+      #   rescue NoMatchingPatternError => e
+      #     e.class
+      #   end # => NoMatchingPatternError
+      #
+      # @example a pattern reaches the kind of value inside the variant
+      #   result = Err(StandardError.new("nope"))
       #   case result
-      #   in Errgonomic::Result::Ok, value
+      #   in Ok(value)
       #     "Measurement is #{value}"
-      #   in Errgonomic::Result::Err, String => msg
+      #   in Err(String => msg)
       #     "Measurement failed with a message: #{msg}"
-      #   in Errgonomic::Result::Err, Exception => e
+      #   in Err(Exception => e)
       #     "Measurement produced an exception -- #{e.class}: #{e}"
       #   end # => "Measurement produced an exception -- StandardError: nope"
       def deconstruct
-        [self, value]
+        [value]
       end
 
       protected
@@ -643,3 +661,8 @@ end
 def Err(value = Errgonomic::Result::Err::Arbitrary)
   Errgonomic::Result::Err.new(value)
 end
+
+# The variants under their short names, so a pattern reads as it does in
+# Rust: `in Ok(v)`, `in Err(e)`.
+Ok = Errgonomic::Result::Ok
+Err = Errgonomic::Result::Err
