@@ -626,21 +626,24 @@ module Errgonomic
         block.call(value)
       end
 
-      # convert the option into a result where Some is Ok and None is Err
-      # @example
-      #   None().ok # => Err()
-      #   Some(1).ok # => Ok(1)
-      def ok
-        return Errgonomic::Result::Ok.new(value) if some?
-
-        Errgonomic::Result::Err.new
-      end
-
       # Transforms the option into a result, mapping Some(v) to Ok(v) and None to Err(err)
       #
       # @example
       #   None().ok_or("wow") # => Err("wow")
       #   Some(1).ok_or("such err") # => Ok(1)
+      #
+      # @example there is no bare ok: an Err always names its error
+      #   begin
+      #     None().ok
+      #   rescue NoMethodError => e
+      #     e.class
+      #   end # => Errgonomic::UnwrappedAccessError
+      #   begin
+      #     Some(1).ok
+      #   rescue NoMethodError => e
+      #     e.class
+      #   end # => Errgonomic::UnwrappedAccessError
+      #   Some(1).respond_to?(:ok) # => false
       def ok_or(err)
         return Errgonomic::Result::Ok.new(value) if some?
 
