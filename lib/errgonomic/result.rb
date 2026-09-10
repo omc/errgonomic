@@ -487,6 +487,19 @@ module Errgonomic
       #   in Err(_) then :any_err
       #   end # => :any_err
       #
+      # @example an Err nested in an Ok matches through the Ok's payload
+      #   case Ok(Err(:boom))
+      #   in Ok(Err(e)) then e
+      #   end # => :boom
+      #   case Ok(Err(:boom))
+      #   in Ok(Err()) then :empty
+      #   in Ok(Err(_)) then :err_inside
+      #   end # => :err_inside
+      #   case Ok(Err(:boom))
+      #   in Ok(Ok(value)) then value
+      #   in Ok(Err) then :err_inside
+      #   end # => :err_inside
+      #
       # @example a two-branch case/in with no else is exhaustive
       #   case Ok(1)
       #   in Ok(value)
