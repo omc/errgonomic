@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+## [0.9.2] - 2026-09-10
+
+This release makes `Option#and`, `#xor`, `#zip` and `#zip_with` check their operand the way `or` already did.
+
+### Upgrading from 0.9.1
+
+`Option#and`, `#xor`, `#zip` and `#zip_with` raise `Errgonomic::ArgumentError` on a bare operand, on a `None` receiver as well as a `Some`. Code that passed a bare value to `and` and read it back has to wrap it.
+
+### Changes
+
+- [Behavior change] `Option#and`, `#xor`, `#zip` and `#zip_with` check their operand the way `or` already did, raising `Errgonomic::ArgumentError` (`other must be an Option, was Integer`) before the receiver's variant is consulted. 0.9.x let `Some(2).and(3)` hand back the bare `3`, let `None().and(3)` and `None().zip(2)` accept the operand silently, and let `Some(1).zip(2)` and `Some(:l).xor(:r)` fall into a bare `NoMethodError` on `some?` or `none?`
+
 ## [0.9.1] - 2026-09-10
 
 This release reverts the 0.9.0 change that made `to_s` render an Option or a Result. The raise is back, with a message that says what to call instead.
