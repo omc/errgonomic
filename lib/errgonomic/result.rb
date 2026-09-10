@@ -514,13 +514,23 @@ module Errgonomic
       #
       # @example the wrong type falls through to Ruby's own exhaustiveness check
       #   begin
+      #     case :done
+      #     in Ok(value) then value
+      #     in Err(err) then err
+      #     end
+      #   rescue NoMatchingPatternError => e
+      #     [e.class, e.message]
+      #   end # => [NoMatchingPatternError, "done"]
+      #
+      # @example an Option that falls through carries a message that refuses to print
+      #   begin
       #     case Some(1)
       #     in Ok(value) then value
       #     in Err(err) then err
       #     end
       #   rescue NoMatchingPatternError => e
-      #     e.class
-      #   end # => NoMatchingPatternError
+      #     [e.class, (e.message rescue $!.class)]
+      #   end # => [NoMatchingPatternError, Errgonomic::SerializeError]
       #
       # @example a pattern reaches the kind of value inside the variant
       #   result = Err(StandardError.new("nope"))

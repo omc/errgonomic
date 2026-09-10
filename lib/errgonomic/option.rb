@@ -208,8 +208,18 @@ module Errgonomic
       #     in None then nil
       #     end
       #   rescue NoMatchingPatternError => e
-      #     e.class
-      #   end # => NoMatchingPatternError
+      #     [e.class, e.message]
+      #   end # => [NoMatchingPatternError, "1"]
+      #
+      # @example a Result that falls through carries a message that refuses to print
+      #   begin
+      #     case Ok(1)
+      #     in Some(value) then value
+      #     in None then nil
+      #     end
+      #   rescue NoMatchingPatternError => e
+      #     [e.class, (e.message rescue $!.class)]
+      #   end # => [NoMatchingPatternError, Errgonomic::SerializeError]
       #
       # @example patterns nest through the inner value's own protocol
       #   case Ok(Some(1))
