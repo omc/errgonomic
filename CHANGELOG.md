@@ -1,5 +1,18 @@
 ## [Unreleased]
 
+## [0.9.1] - 2026-09-10
+
+This release reverts the 0.9.0 change that made `to_s` render an Option or a Result. The raise is back, with a message that says what to call instead.
+
+### Upgrading from 0.9.0
+
+`to_s` on an Option or a Result raises `Errgonomic::SerializeError` again, so a string built from a wrapped reader fails where it is built rather than writing `Some("...")` or `None` into it. Code written against 0.9.0's rendering, whether a string interpolation, an `Array#join`, a `format`, a `String()` or a bare ERB `<%= %>`, has to take the value first: `unwrap_or` or `expect!` for the value, or `inspect` for a log line. A `rescue` that interpolates a wrapper into its message writes `inspect` there. A `rescue Errgonomic::SerializeError` written against 0.8.x still matches.
+
+### Changes
+
+- [Behavior change] `to_s` on an Option or a Result raises `Errgonomic::SerializeError` where 0.9.0 rendered it as `inspect` does. The message names the value with its `inspect`, bounded to 60 characters, says `to_s` is refused, and names `inspect` for a log line and `unwrap_or` / `expect!` for the value: `Some(1) refuses to_s; use inspect for a log line, or unwrap_or / expect! for the value`. 0.9.0's rendering wrote wrapper text into data at every site that built a string from a wrapped reader, with no exception to find the site by: a UNIQUE identity column, a hostname, a hashed auth token and a customer-facing page. A raise that names the remedy serves the log-line case 0.9.0 traded for, and `inspect` is unchanged
+- An Option or a Result in a Hash key raises on its way to JSON again. The json gem and ActiveSupport's `as_json` both stringify a key with `to_s`, so 0.9.0's rendering let `{ Some(1) => 2 }.as_json` write `{"Some(1)" => 2}` where a value position had always raised
+
 ## [0.9.0] - 2026-09-08
 
 This release turns the ActiveRecord integration from a set of wrapped readers into a full set of boundaries, covering readers, writers, query binds, validation and serialization, with the behavior changes named in the bullets below.
