@@ -5,8 +5,8 @@ require_relative 'variant_name'
 module Errgonomic
   module Result
     # The base class for Result's Ok and Err class variants. We implement as
-    # much logic as possible here, and let Ok and Err handle their
-    # initialization and self identification.
+    # much logic as possible here, including construction, and let Ok and
+    # Err handle only their self identification.
     class Any
       include Comparable
 
