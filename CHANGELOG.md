@@ -1,5 +1,18 @@
 ## [Unreleased]
 
+## [0.10.2] - 2026-09-10
+
+This release makes every `Err` carry an error and removes `Option#ok`, the one method that built an `Err` without one.
+
+### Upgrading from 0.10.1
+
+Replace `Err()` with `Err(reason)`, and a pattern `in Err()` with `in Err` or `in Err(_)`: `Err()` and `Err.new` with no argument raise `ArgumentError`, and `in Err()` no longer matches any `Err`. Replace `opt.ok` with `opt.ok_or(reason)`; `ok` on an Option now raises `Errgonomic::UnwrappedAccessError`, which names `ok_or` and `ok_or_else`.
+
+### Changes
+
+- [Behavior change] `Err()` and `Errgonomic::Result::Err.new` with no argument raise `ArgumentError`. A value-less `Err` held an internal placeholder, `Errgonomic::Result::Err::Arbitrary`, which `unwrap_err!` handed back to the caller, a gem-internal value leaking into application data. The placeholder is deleted along with the special case that made `Err().deconstruct` answer `[]`, so `Err(e).deconstruct` is always `[e]`, `in Err(e)` and `in Err(_)` match every `Err`, and `in Err()` matches none. `Err(nil)` is unchanged: it carries `nil`
+- `Option#ok` is removed. `None().ok` was the only method that returned a value-less `Err`, and Rust has no `Option::ok`; `ok_or` and `ok_or_else` make the caller name the error
+
 ## [0.10.1] - 2026-09-10
 
 This release makes cross-type equality raise unconditionally and removes the switch that used to turn it on.
