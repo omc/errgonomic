@@ -17,6 +17,8 @@ module Errgonomic
   #   None.inspect # => "Errgonomic::Option::None"
   #   "tier-#{None}" # => raise Errgonomic::SerializeError, "bare None names a variant for a pattern, not a value; build one with parentheses"
   #   [Ok].join # => raise Errgonomic::SerializeError, "bare Ok names a variant for a pattern, not a value; build one with parentheses"
+  #   Some(1).is_a?(Some) # => raise TypeError, "class or module required"
+  #   Some(1).is_a?(Errgonomic::Option::Some) # => true
   class VariantName
     # Name a variant at top level, refusing a constant the application
     # already holds there rather than replacing it.
