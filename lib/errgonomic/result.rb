@@ -616,6 +616,15 @@ module Errgonomic
     #   Err() # => raise ArgumentError, "wrong number of arguments (given 0, expected 1)"
     #   Err.new # => raise NoMethodError, "undefined method 'new' for an instance of Errgonomic::VariantName"
     #   Errgonomic::Result::Err.new # => raise ArgumentError, "wrong number of arguments (given 0, expected 1)"
+    #
+    # @example Err(nil) is an ordinary Err that holds nil
+    #   Err(nil).inspect # => "Err(nil)"
+    #   Err(nil).unwrap_err! # => nil
+    #   Err(nil).deconstruct # => [nil]
+    #   case Err(nil)
+    #   in Ok(value) then [:ok, value]
+    #   in Err(e) then [:err, e]
+    #   end # => [:err, nil]
     class Err < Any
       # Err is always err
       #
