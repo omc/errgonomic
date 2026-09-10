@@ -135,7 +135,11 @@ module Errgonomic
       #   { Some(1) => :v }[1] # => nil
       #   Set[Some(1)].include?(1) # => false
       #   [Some(1), 1].uniq # => [Some(1), 1]
+      #
+      # @example a short array compares member by member with eql?, so the side the wrapper is on decides
+      #   [1] - [Some(1)] # => [1]
       #   [Some(1)] | [1] # => [Some(1), 1]
+      #   [1] | [Some(1)] # => raise Errgonomic::TypeMismatchError, "Errgonomic::Option::Some eql? Integer, which strict equality refuses.\nCompare Options (opt == Some(1)), test the inner value (opt.some_and? { |v| v == 1 }), or unwrap_or a fallback first."
       #
       # @example nil and String answer for themselves, and never ask the Option
       #   nil == Some(1) # => false
