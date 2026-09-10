@@ -1,5 +1,29 @@
 ## [Unreleased]
 
+## [0.10.0] - 2026-09-10
+
+This release closes four gaps a mass conversion found in the containers themselves: a combinator that let a bare value through, a public `value` slot, a `deconstruct` shape that missed the Rust-shaped pattern, and a cross-type equality that answered `false` where it should have raised.
+
+### Upgrading from 0.9.x
+
+`value` and `value=` are gone from `Some`, `Ok` and `Err`, and every instance is frozen. A read of `.value` becomes `unwrap_or(fallback)`, `expect!(message)`, `map`, `and_then` or a pattern, each of which names the other branch; a write of `.value=` becomes a new `Some(v)` assigned where the old one lived. A call to either now raises `Errgonomic::UnwrappedAccessError`, which is a `NoMethodError`, naming the combinators.
+
+`deconstruct` answers `[value]` for a `Some`, an `Ok` and an `Err` and `[]` for a `None`, so a pattern written against 0.9.x's `[self, value]` has to change shape: `in Errgonomic::Option::Some, v` becomes `in Some(v)`, `in Errgonomic::Result::Err, String => msg` becomes `in Err(String => msg)`, and `in Errgonomic::Option::None` stays as it is or becomes `in None`. `Some`, `None`, `Ok` and `Err` are now top-level constants for the four classes as well as constructors. An application that defines its own constant under one of those names has to rename it.
+
+`Errgonomic.strict_equality=`, `Errgonomic.strict_equality?` and `Errgonomic.with_strict_equality` are removed, along with `rake test:strict`, because cross-type equality always raises now. A `Some(x) == x`, `!= x`, `eql?(x)` or `=== x` anywhere in an application raises `Errgonomic::TypeMismatchError` where 0.9.x answered `false`, and so does every collection operation that compares pairwise (`Array#include?`, `Array#-`, `Array#==`, `Hash#==`, `case/when`) and a Minitest `assert_equal` between a wrapper and a bare value. Compare wrappers (`opt == Some(x)`), test the inner value (`opt.some_and? { |v| v == x }`), or `unwrap_or` a fallback first. Delete any `Errgonomic.strict_equality = true` in a test helper; it has nothing left to set.
+
+`Option#and`, `#xor`, `#zip` and `#zip_with` raise `Errgonomic::ArgumentError` on a bare operand, on a `None` receiver as well as a `Some`. Code that passed a bare value to `and` and read it back has to wrap it.
+
+### Changes
+
+- [Behavior change] `Option#and`, `#xor`, `#zip` and `#zip_with` check their operand the way `or` already did, raising `Errgonomic::ArgumentError` (`other must be an Option, was Integer`) before the receiver's variant is consulted. 0.9.x let `Some(2).and(3)` hand back the bare `3`, let `None().and(3)` and `None().zip(2)` accept the operand silently, and let `Some(1).zip(2)` and `Some(:l).xor(:r)` fall into a bare `NoMethodError` on `some?` or `none?`
+- [Behavior change] `Some`, `Ok` and `Err` no longer expose `value` or `value=`, and every Option and Result is frozen on construction. The reader reached the inner value with no `None` branch, the writer mutated a wrapper through an alias and moved a Hash key out from under its own bucket, and the README already said an Option is a value rather than a slot. The reader is protected, for the sibling reads equality, ordering and `zip` need; a call from outside gets the combinator teaching `Errgonomic::UnwrappedAccessError` gives any other miss
+- [Behavior change] `deconstruct` answers `[value]` for a `Some`, an `Ok` and an `Err` and `[]` for a `None`, the one-payload shape `Data.define(:value)` and Rust's tuple variants share, where 0.9.x answered `[self, value]` and `[None]`. `in Some(v)` binds the value, `in Ok(Some(v))` nests, a two-branch `case/in` with no `else` is exhaustive, and a wrong type reaches `NoMatchingPatternError`. There is no `deconstruct_keys`: a one-payload sum type has no named field, and a `Some` around a Hash nests as `in Some({ id: })` through the Hash's own protocol
+- `Some`, `None`, `Ok` and `Err` are defined as top-level constants for the four classes, beside the constructors of the same name, so a pattern reads as it does in Rust. Rails defines none of the four
+- [Behavior change] `==`, `!=`, `eql?` and `===` between an Option or a Result and a value that is not one always raise `Errgonomic::TypeMismatchError`, with the message 0.9.0 gave under the flag. `Some(1) == 1` answering `false` is the silent wrong branch that mirrors a wrapper written into a string, and 0.9.0 had the safe behavior opt-in. `===` is defined so `case 5 when Some(5)` and a pinned pattern raise under the operator that was written. `eql?` is not exempted: Ruby's hashing compares hash values first and asks `eql?` only of a candidate whose hash matches, so `Hash#[]`, `Set` and `uniq` stay quiet while `Array#include?`, `Array#-`, `Array#==` and `case/when` compare pairwise and raise. Strict equality never answers wrong, it only sometimes fails to catch, and `nil == Some(1)` is answered by `NilClass` and cannot be intercepted. The README states the whole surface
+- `Errgonomic.strict_equality=`, `Errgonomic.strict_equality?` and `Errgonomic.with_strict_equality` are removed, which also removes a process-global flag that leaked across threads and whose block form's `ensure` could turn the mode off for a thread that had set it
+- [Dev, Test] `rake test:strict` is removed, with its support file and CI step: the Rails integration suite runs under strict equality as `rake test`
+
 ## [0.9.1] - 2026-09-10
 
 This release reverts the 0.9.0 change that made `to_s` render an Option or a Result. The raise is back, with a message that says what to call instead.
