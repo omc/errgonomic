@@ -122,9 +122,9 @@ in Errgonomic::Option::None
 end
 ```
 
-An unhandled Option refuses to leak into your output: `to_json` and `as_json` raise `Errgonomic::SerializeError`, so you handle the inner value deliberately rather than shipping `#<Errgonomic::Option::Some...>` to a user. The refusal names what it was carrying (`cannot serialize an unwrapped Some("cell-a1b2")`), so a payload built out of many values says which one went unhandled; the value's `inspect` is bounded to 60 characters, with an ellipsis past that. The refusal covers `as_json` because Hash and Array serialization recurses through that method, and an Option nested in a payload would otherwise serialize as `{"value": ...}`. A converted ActiveRecord model is the one exception, at the model boundary: it unwraps each attribute as it serializes, so a record's own `as_json` says what an unconverted record's says. See [Rails integration](#rails-integration).
+An unhandled Option refuses to leak into your output: `to_s`, `to_json` and `as_json` raise `Errgonomic::SerializeError`, so you handle the inner value deliberately rather than shipping `Some("...")` to a user. The refusal names what it was carrying (`cannot serialize an unwrapped Some("cell-a1b2")`), so a payload built out of many values says which one went unhandled; the value's `inspect` is bounded to 60 characters, with an ellipsis past that. The refusal covers `as_json` because Hash and Array serialization recurses through that method, and an Option nested in a payload would otherwise serialize as `{"value": ...}`. A converted ActiveRecord model is the one exception, at the model boundary: it unwraps each attribute as it serializes, so a record's own `as_json` says what an unconverted record's says. See [Rails integration](#rails-integration).
 
-`to_s` renders rather than refusing: `Some(1).to_s` is `"Some(1)"` and `None().to_s` is `"None"`, matching `inspect`, and the same holds for `Ok` and `Err`. Rust gives `Option` a `Debug` and no `Display`, so raising was the faithful reading, but a `to_s` that raises replaces the real exception while a `rescue` builds its log line, which is the worst possible place to be strict. The rendered form is unambiguous: a `Some(1)` in a log says a wrapper arrived where a value was meant.
+The `to_s` refusal is the loudest guard of the three, because a string is where a wrapper turns into data: string interpolation, `Array#join`, `format`, `String()`, a bare ERB `<%= %>` and the key of a Hash on its way to JSON all reach the value through `to_s`, and every one of them raises rather than writing `Some("...")` into a hostname, a column or a page. Rust gives `Option` a `Debug` and no `Display`, and `inspect` is the `Debug` here: it renders `Some(1)`, and it is what a log line or a `rescue` should call (`"got #{opt.inspect}"`). The refusal says so: `Some(1) refuses to_s; use inspect for a log line, or unwrap_or / expect! for the value`.
 
 `expect!` also takes a block, on an Option and a Result alike, so a message that interpolates is built only on the branch that raises: `tier.expect! { "no tier for #{account.id}" }`. `present_or_raise!` takes one on the same terms. The positional form is unchanged.
 
@@ -177,7 +177,7 @@ in Errgonomic::Result::Err, Exception => e
 end
 ```
 
-Like Options, unwrapped Results refuse `to_json` and `as_json`, and render `to_s` as `inspect` does. And `Object#result?` / `Object#assert_result!` help enforce at runtime that a value is a Result.
+Like Options, unwrapped Results refuse `to_s`, `to_json` and `as_json`, and render through `inspect`. And `Object#result?` / `Object#assert_result!` help enforce at runtime that a value is a Result.
 
 ### Optional collections
 
