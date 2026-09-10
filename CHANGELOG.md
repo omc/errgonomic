@@ -1,5 +1,20 @@
 ## [Unreleased]
 
+## [0.10.1] - 2026-09-10
+
+This release makes cross-type equality raise unconditionally and removes the switch that used to turn it on.
+
+### Upgrading from 0.10.0
+
+`Errgonomic.strict_equality=`, `Errgonomic.strict_equality?` and `Errgonomic.with_strict_equality` are removed, along with `rake test:strict`, because cross-type equality always raises now. A `Some(x) == x`, `!= x`, `eql?(x)` or `=== x` anywhere in an application raises `Errgonomic::TypeMismatchError` where 0.9.x answered `false`, and so does every collection operation that compares pairwise (`Array#include?`, `Array#-`, `Array#==`, `Hash#==`, `case/when`) and a Minitest `assert_equal` between a wrapper and a bare value. Compare wrappers (`opt == Some(x)`), test the inner value (`opt.some_and? { |v| v == x }`), or `unwrap_or` a fallback first. Delete any `Errgonomic.strict_equality = true` in a test helper; it has nothing left to set.
+
+### Changes
+
+- [Behavior change] `==`, `!=`, `eql?` and `===` between an Option or a Result and a value that is not one always raise `Errgonomic::TypeMismatchError`, with the message 0.9.0 gave under the flag. `Some(1) == 1` answering `false` is the silent wrong branch that mirrors a wrapper written into a string, and 0.9.0 had the safe behavior opt-in. `===` is defined so `case 5 when Some(5)` and a pinned pattern raise under the operator that was written. `eql?` is not exempted: Ruby's hashing compares hash values first and asks `eql?` only of a candidate whose hash matches, so `Hash#[]`, `Set` and `uniq` stay quiet while `Array#include?`, `Array#-`, `Array#==` and `case/when` compare pairwise and raise. Strict equality never answers wrong, it only sometimes fails to catch, and `nil == Some(1)` is answered by `NilClass` and cannot be intercepted. The README states the whole surface
+- `Errgonomic.strict_equality=`, `Errgonomic.strict_equality?` and `Errgonomic.with_strict_equality` are removed, which also removes a process-global flag that leaked across threads and whose block form's `ensure` could turn the mode off for a thread that had set it
+- `Errgonomic.lenient_inner_value_comparison?` and `Errgonomic.give_me_lenient_inner_value_comparison=` are removed; nothing read them
+- [Dev, Test] `rake test:strict` is removed, with its support file and CI step: the Rails integration suite runs under strict equality as `rake test`
+
 ## [0.10.0] - 2026-09-10
 
 This release gives `deconstruct` the Rust shape and names the four variants at top level, so a pattern reads as `in Some(v)`.
