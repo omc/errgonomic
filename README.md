@@ -150,7 +150,7 @@ The remaining present-side helpers are soft-deprecated on Options in favor of th
 
 Four of Rust's methods are deliberately absent: `take`, `replace`, `insert` and `get_or_insert`. Every one of them writes through an `&mut Option`, and an Option here is a value rather than a slot: `Some(1)` is something you pass around and compare, not a cell whose contents you swap out from under another reference. Build the Option you want and assign it where the old one lived. The same rule is why a `Some`, an `Ok` and an `Err` have no `value` reader or writer, and why every instance is frozen as it is constructed. A copy that skips construction, from `dup`, `Marshal.load`, a YAML load or ActiveSupport's `deep_dup`, is not frozen; with no writer, it changes only through `instance_variable_set`. A reader would reach the inner value with no `None` branch, and a writer would move a Hash key out from under its own bucket. Reach in with `unwrap_or`, `expect!`, `map`, `and_then` or a pattern, each of which names what happens on the other branch.
 
-Equality is between Options only: `Some(5) == Some(5)`, but `Some(5) == 5` and `None() == nil` are `false`. That is quiet, never an error, matching how every Ruby object compares across types. Rust rejects `Some(5) == 5` at compile time; Ruby cannot, so guard the idiom in review and tests: compare against a wrapped value (`opt == Some(5)`) or test the inner value (`opt.some_and? { |v| v == 5 }`). `Errgonomic.strict_equality = true` turns that guard into an error, which is what a test suite wants; see [Pedantic runtime checks](#pedantic-runtime-checks).
+Equality is between Options only: `Some(5) == Some(5)` is `true` and `Some(5) == Some(6)` is `false`, and comparing an Option with anything that is not one raises `Errgonomic::TypeMismatchError`. Rust rejects `Some(5) == 5` at compile time; Ruby cannot, and a quiet `false` there is a silent wrong branch, the same failure as a wrapper written into a string. Compare against a wrapped value (`opt == Some(5)`), test the inner value (`opt.some_and? { |v| v == 5 }`), or `unwrap_or` a fallback first. `None() == nil` raises too, pointing at `none?`. See [Strict equality](#strict-equality) for where the raise reaches and where it cannot.
 
 Ordering is between Options too, and unlike equality it says so out loud. `None()` sorts before any `Some` and two `Some`s order by their inner values, so a collection of Options sorts. Ordering one against a bare value raises `Errgonomic::TypeMismatchError` naming both operands and the spellings that work: `Some(read_at) <= Time.current` used to answer `nil` from `<=>`, which `Comparable` turned into an `ArgumentError` naming the Option as the operand at fault. Test the inner value (`read_at.some_and? { |t| t <= Time.current }`) or reach for it with `map` or `unwrap_or`. Two Options whose inner values do not compare still answer `nil`, as Ruby expects. That message is the gem's only where the Option is the receiver: with it on the right (`2 < Some(1)`, `[Some(1), 2].max`) `Integer` answers the comparison itself and Ruby raises its own `ArgumentError: comparison of Integer with Errgonomic::Option::Some failed`. Results order the same way, with `ok_and?` in place of `some_and?`.
 
@@ -257,35 +257,31 @@ Errgonomic.with_ambiguous_downstream_errors do
 end
 ```
 
-Cross-type equality is the other pedantic check, and it is off by default because a quiet `false` is what every Ruby object answers. Turn it on and a comparison between a wrapper and a value that is not one raises `Errgonomic::TypeMismatchError`, naming both classes and the spelling to reach for:
+### Strict equality
+
+Cross-type equality is the other pedantic check, and there is no switch for it. A comparison between a wrapper and a value that is not one raises `Errgonomic::TypeMismatchError`, naming both classes and the spelling to reach for:
 
 ```ruby
-Errgonomic.strict_equality = true
-
 Some(5) == 5        # => raises Errgonomic::TypeMismatchError
 Some(5) != 5        # => raises
 Some(5).eql?(5)     # => raises
+Some(5) === 5       # => raises, so `case 5 when Some(5)` raises too
 None() == nil       # => raises, pointing at none?
 Ok(1) == 1          # => raises
 Some(1) == Ok(1)    # => raises: an Option and a Result are different containers
-Some(5) == Some(5)  # => true, as always
+Some(5) == Some(5)  # => true
+Some(5) == None()   # => false
 
 1 == Some(1)        # => raises, through Integer's coercion fallback
 nil == None()       # => false, quietly
 "a" == Some("a")    # => false, quietly
 ```
 
-A Result is cross-type for an Option and an Option is cross-type for a Result: they are different containers, neither is the other, and the message says to unwrap whichever one you meant. Two Options, or two Results, compare as they always did, and `hash` is untouched, so an Option stays usable as a Hash key with it on.
+A Result is cross-type for an Option and an Option is cross-type for a Result: they are different containers, neither is the other, and the message says to unwrap whichever one you meant. Two Options, or two Results, compare by variant and inner value, and `hash` is untouched, so an Option is a Hash key like any other value.
 
-Strictness fires when the wrapper is the receiver, and also when the left operand hands the comparison over: `1 == Some(1)` raises because `Integer#==` falls back to asking the right-hand side. `nil == None()` and `"a" == Some("a")` stay quietly false, because `NilClass` and `String` answer for themselves and never consult the operand. Put the wrapper on the left in a test if you want the check to reach every comparison. It is meant for a test suite or CI, not for production, and there is a block form for scoping it the way the ambiguous-error opt-out is scoped:
+The raise surface is uneven, because Ruby's collections reach equality two ways. Anything that compares pairwise reaches `==` or `eql?` and raises: `Array#include?`, `Array#index`, `Array#delete`, `Array#count`, `Array#-`, `Array#==`, `Hash#==`, `case/when`, and a Minitest `assert_equal` between a wrapper and a bare value, which comes back as an error rather than a failure. Anything that goes through a hash compares hash values first and asks `eql?` only of a candidate whose hash matches, so it stays quiet: `Hash#[]`, `Set#include?`, `uniq`, `group_by` and `Array#|` answer as they would for any two unequal keys. Strict equality never answers wrong; it only sometimes fails to catch.
 
-```ruby
-Errgonomic.with_strict_equality do
-  assert_equal Some(5), book.pages
-end
-```
-
-This gem runs its own Rails integration suite that way, as `rake test:strict`.
+Strictness fires when the wrapper is the receiver, and also when the left operand hands the comparison over: `1 == Some(1)` raises because `Integer#==` falls back to asking the right-hand side. `nil == Some(1)`, `nil == None()` and `"a" == Some("a")` stay quietly false, because `NilClass` and `String` answer for themselves and never consult the operand, and nothing in the gem can intercept them. Put the wrapper on the left in a test if you want the check to reach every comparison.
 
 ### Rails integration
 
