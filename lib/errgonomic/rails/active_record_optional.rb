@@ -516,10 +516,10 @@ module Errgonomic
     #   Errgonomic::Rails.unwrap_options(1) # => 1
     def self.unwrap_options(value)
       case value
-      when Errgonomic::Option::Any
-        value.unwrap_or(nil)
+      when Errgonomic::Option::Any, Errgonomic::VariantName
+        unwrap_option(value)
       when Array
-        value.any? { |v| v.is_a?(Errgonomic::Option::Any) } ? value.map { |v| unwrap_options(v) } : value
+        value.any? { |v| unwrapped_at_boundary?(v) } ? value.map { |v| unwrap_options(v) } : value
       else
         value
       end
@@ -527,13 +527,16 @@ module Errgonomic
 
     # Take the value inside an Option, and a None as nil, where the boundary
     # takes one value: an attribute is a single typed field, so a collection
-    # that happens to hold an Option is that collection.
+    # that happens to hold an Option is that collection. A bare variant name
+    # is refused here, since a boolean column would cast it to true.
     #
     # @example
     #   Errgonomic::Rails.unwrap_option(Some(1)) # => 1
     #   Errgonomic::Rails.unwrap_option(None()) # => nil
     #   Errgonomic::Rails.unwrap_option([Some(1)]) # => [Some(1)]
+    #   Errgonomic::Rails.unwrap_option(None) # => raise Errgonomic::SerializeError, "bare None names a variant for a pattern, not a value; build one with parentheses"
     def self.unwrap_option(value)
+      value.refuse! if value.is_a?(Errgonomic::VariantName)
       value.is_a?(Errgonomic::Option::Any) ? value.unwrap_or(nil) : value
     end
 
@@ -548,7 +551,7 @@ module Errgonomic
     #   plain = { title: 'x' }
     #   Errgonomic::Rails.unwrap_option_values(plain).equal?(plain) # => true
     def self.unwrap_option_values(hash)
-      return hash unless hash.each_value.any?(Errgonomic::Option::Any)
+      return hash unless hash.each_value.any? { |value| unwrapped_at_boundary?(value) }
 
       hash.transform_values { |value| unwrap_option(value) }
     end
@@ -561,9 +564,15 @@ module Errgonomic
     #   plain = [{ title: 'x' }]
     #   Errgonomic::Rails.unwrap_option_rows(plain).equal?(plain) # => true
     def self.unwrap_option_rows(rows)
-      return rows unless rows.any? { |row| row.is_a?(Hash) && row.each_value.any?(Errgonomic::Option::Any) }
+      return rows unless rows.any? { |row| row.is_a?(Hash) && row.each_value.any? { |v| unwrapped_at_boundary?(v) } }
 
       rows.map { |row| row.is_a?(Hash) ? unwrap_option_values(row) : row }
+    end
+
+    # An Option, or a bare variant name, which a boundary refuses rather than
+    # let a column type cast it.
+    def self.unwrapped_at_boundary?(value)
+      value.is_a?(Errgonomic::Option::Any) || value.is_a?(Errgonomic::VariantName)
     end
 
     # A declared default that is a Proc is not a value yet: ActiveModel calls

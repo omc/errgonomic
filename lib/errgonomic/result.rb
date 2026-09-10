@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative 'variant_name'
+
 module Errgonomic
   module Result
     # The base class for Result's Ok and Err class variants. We implement as
@@ -252,12 +254,16 @@ module Errgonomic
       end
 
       # Return the inner value of an Err, else raise an exception when Ok.
+      # The message is the Ok's value as inspect renders it, bounded, so an
+      # Ok holding an Option or a Result still has a message to print.
       #
       # @example
-      #   Ok(1).unwrap_err! # => raise Errgonomic::UnwrapError, 1
+      #   Ok(1).unwrap_err! # => raise Errgonomic::UnwrapError, "1"
+      #   Ok(Some(1)).unwrap_err! # => raise Errgonomic::UnwrapError, "Some(1)"
+      #   Ok("a" * 100).unwrap_err! # => raise Errgonomic::UnwrapError, "\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa..."
       #   Err(:e).unwrap_err! # => :e
       def unwrap_err!
-        raise Errgonomic::UnwrapError, value unless err?
+        raise Errgonomic::UnwrapError.new(bounded_inspect(value), value) unless err?
 
         @value
       end
@@ -502,13 +508,23 @@ module Errgonomic
       #
       # @example the wrong type falls through to Ruby's own exhaustiveness check
       #   begin
+      #     case :done
+      #     in Ok(value) then value
+      #     in Err(err) then err
+      #     end
+      #   rescue NoMatchingPatternError => e
+      #     [e.class, e.message]
+      #   end # => [NoMatchingPatternError, "done"]
+      #
+      # @example an Option that falls through carries a message that refuses to print
+      #   begin
       #     case Some(1)
       #     in Ok(value) then value
       #     in Err(err) then err
       #     end
       #   rescue NoMatchingPatternError => e
-      #     e.class
-      #   end # => NoMatchingPatternError
+      #     [e.class, (e.message rescue $!.class)]
+      #   end # => [NoMatchingPatternError, Errgonomic::SerializeError]
       #
       # @example a pattern reaches the kind of value inside the variant
       #   result = Err(StandardError.new("nope"))
@@ -540,8 +556,8 @@ module Errgonomic
 
       # Name the value the caller failed to handle, bounded: an inspect of a
       # record or a long payload would bury the message carrying it.
-      def bounded_inspect
-        rendered = inspect
+      def bounded_inspect(object = self)
+        rendered = object.inspect
         rendered.length > 60 ? "#{rendered[0, 57]}..." : rendered
       end
 
@@ -677,5 +693,5 @@ end
 
 # The variants under their short names, so a pattern reads as it does in
 # Rust: `in Ok(v)`, `in Err(e)`.
-Ok = Errgonomic::Result::Ok
-Err = Errgonomic::Result::Err
+Errgonomic::VariantName.define(:Ok, Errgonomic::Result::Ok)
+Errgonomic::VariantName.define(:Err, Errgonomic::Result::Err)

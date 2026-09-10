@@ -21,25 +21,25 @@ This release gives `deconstruct` the Rust shape and names the four variants at t
 
 ### Upgrading from 0.9.3
 
-`deconstruct` answers `[value]` for a `Some`, an `Ok` and an `Err` and `[]` for a `None`, so a pattern written against 0.9.x's `[self, value]` has to change shape: `in Errgonomic::Option::Some, v` becomes `in Some(v)`, `in Errgonomic::Result::Err, String => msg` becomes `in Err(String => msg)`, and `in Errgonomic::Option::None` stays as it is or becomes `in None`. `Some`, `None`, `Ok` and `Err` are now top-level constants for the four classes as well as constructors. An application that defines its own constant under one of those names has to rename it.
+`deconstruct` answers `[value]` for a `Some`, an `Ok` and an `Err` and `[]` for a `None`, so a pattern written against 0.9.x's `[self, value]` has to change shape: `in Errgonomic::Option::Some, v` becomes `in Some(v)`, `in Errgonomic::Result::Err, String => msg` becomes `in Err(String => msg)`, and `in Errgonomic::Option::None` stays as it is or becomes `in None`. `Some`, `None`, `Ok` and `Err` are now top-level names for the four variants, for patterns, as well as constructors. An application that defines its own constant under one of those names has to rename it: errgonomic refuses to load over one with a `NameError`, and a `class` or `module` of that name written after it loads raises `TypeError`.
 
 ### Changes
 
 - [Behavior change] `deconstruct` answers `[value]` for a `Some`, an `Ok` and an `Err` and `[]` for a `None`, the one-payload shape `Data.define(:value)` and Rust's tuple variants share, where 0.9.x answered `[self, value]` and `[None]`. `in Some(v)` binds the value, `in Ok(Some(v))` nests, a two-branch `case/in` with no `else` is exhaustive, and a wrong type reaches `NoMatchingPatternError`. There is no `deconstruct_keys`: a one-payload sum type has no named field, and a `Some` around a Hash nests as `in Some({ id: })` through the Hash's own protocol
 - A value-less `Err()` deconstructs to `[]`, so `in Err` and `in Err()` match it and `in Err(e)` matches only an `Err` that carries a value. The sentinel `Err()` holds in place of a value is internal, and a pattern variable must never bind it
-- `Some`, `None`, `Ok` and `Err` are defined as top-level constants for the four classes, beside the constructors of the same name, so a pattern reads as it does in Rust. Rails defines none of the four
+- `Some`, `None`, `Ok` and `Err` are defined at top level beside the constructors of the same name, so a pattern reads as it does in Rust. Each is an `Errgonomic::VariantName` rather than the class it names: it matches as that class in a pattern and a `case/when`, and a bare one, written as Rust writes `return None`, refuses to stand in for a value. `to_s`, `to_json`, `as_json` and every ActiveRecord boundary that unwraps an Option raise `Errgonomic::SerializeError` on it, where the class would write `Errgonomic::Option::None` into a string, a column or a query, and a boolean column would store `true`. A constant of the same name that the application already defines stops the gem's load with a `NameError`, and a `class None` written after the gem loads raises `TypeError`, rather than one replacing or reopening the other. Rails defines none of the four
 
 ## [0.9.3] - 2026-09-10
 
-This release removes the public `value` slot from `Some`, `Ok` and `Err`, and freezes every instance, so an Option or a Result is the value the README already said it was.
+This release removes the public `value` slot from `Some`, `Ok` and `Err`, and freezes every instance as it is constructed, so an Option or a Result is the value the README already said it was.
 
 ### Upgrading from 0.9.2
 
-`value` and `value=` are gone from `Some`, `Ok` and `Err`, and every instance is frozen. A read of `.value` becomes `unwrap_or(fallback)`, `expect!(message)`, `map`, `and_then` or a pattern, each of which names the other branch; a write of `.value=` becomes a new `Some(v)` assigned where the old one lived. A call to either now raises `Errgonomic::UnwrappedAccessError`, which is a `NoMethodError`, naming the combinators.
+`value` and `value=` are gone from `Some`, `Ok` and `Err`, and every instance is frozen as it is constructed. A read of `.value` becomes `unwrap_or(fallback)`, `expect!(message)`, `map`, `and_then` or a pattern, each of which names the other branch; a write of `.value=` becomes a new `Some(v)` assigned where the old one lived. A call to either now raises `Errgonomic::UnwrappedAccessError`, which is a `NoMethodError`, naming the combinators.
 
 ### Changes
 
-- [Behavior change] `Some`, `Ok` and `Err` no longer expose `value` or `value=`, and every Option and Result is frozen on construction. The reader reached the inner value with no `None` branch, the writer mutated a wrapper through an alias and moved a Hash key out from under its own bucket, and the README already said an Option is a value rather than a slot. The reader is protected, for the sibling reads equality, ordering and `zip` need; a call from outside gets the combinator teaching `Errgonomic::UnwrappedAccessError` gives any other miss
+- [Behavior change] `Some`, `Ok` and `Err` no longer expose `value` or `value=`, and every Option and Result is frozen as it is constructed, whether by `Some`, `None`, `Ok`, `Err`, `new` or a combinator; `clone` keeps it frozen. A copy that skips construction, from `dup`, `Marshal.load`, a YAML load or ActiveSupport's `deep_dup`, is not frozen; with no writer, it changes only through `instance_variable_set`. The reader reached the inner value with no `None` branch, the writer mutated a wrapper through an alias and moved a Hash key out from under its own bucket, and the README already said an Option is a value rather than a slot. The reader is protected, for the sibling reads equality, ordering and `zip` need; a call from outside gets the combinator teaching `Errgonomic::UnwrappedAccessError` gives any other miss
 
 ## [0.9.2] - 2026-09-10
 
@@ -59,12 +59,13 @@ This release reverts the 0.9.0 change that made `to_s` render an Option or a Res
 
 ### Upgrading from 0.9.0
 
-`to_s` on an Option or a Result raises `Errgonomic::SerializeError` again, so a string built from a wrapped reader fails where it is built rather than writing `Some("...")` or `None` into it. Code written against 0.9.0's rendering, whether a string interpolation, an `Array#join`, a `format`, a `String()` or a bare ERB `<%= %>`, has to take the value first: `unwrap_or` or `expect!` for the value, or `inspect` for a log line. A `rescue` that interpolates a wrapper into its message writes `inspect` there. A `rescue Errgonomic::SerializeError` written against 0.8.x still matches.
+`to_s` on an Option or a Result raises `Errgonomic::SerializeError` again, so a string built from a wrapped reader fails where it is built rather than writing `Some("...")` or `None` into it. Code written against 0.9.0's rendering, whether a string interpolation, an `Array#join`, a `format`, a `String()` or a bare ERB `<%= %>`, has to take the value first: `unwrap_or` or `expect!` for the value, or `inspect` for a log line. A `rescue` that interpolates a wrapper into its message writes `inspect` there. A `rescue Errgonomic::SerializeError` written against 0.8.x still matches. A `logger.info(opt)` that rendered through 0.9.0 still renders through a plain `Logger`, but raises under Rails' `TaggedLogging` once a tag such as `request_id` is set, so it can pass in tests and raise in production: write `logger.info(opt.inspect)`. The README's Option section describes this and a `case/in` that matches nothing on a wrapper, whose `NoMatchingPatternError` no longer prints its subject.
 
 ### Changes
 
 - [Behavior change] `to_s` on an Option or a Result raises `Errgonomic::SerializeError` where 0.9.0 rendered it as `inspect` does. The message names the value with its `inspect`, bounded to 60 characters, says `to_s` is refused, and names `inspect` for a log line and `unwrap_or` / `expect!` for the value: `Some(1) refuses to_s; use inspect for a log line, or unwrap_or / expect! for the value`. 0.9.0's rendering wrote wrapper text into data at every site that built a string from a wrapped reader, with no exception to find the site by: a UNIQUE identity column, a hostname, a hashed auth token and a customer-facing page. A raise that names the remedy serves the log-line case 0.9.0 traded for, and `inspect` is unchanged
 - An Option or a Result in a Hash key raises on its way to JSON again. The json gem and ActiveSupport's `as_json` both stringify a key with `to_s`, so 0.9.0's rendering let `{ Some(1) => 2 }.as_json` write `{"Some(1)" => 2}` where a value position had always raised
+- `Result#unwrap_err!` on an `Ok` raises an `Errgonomic::UnwrapError` whose message is the Ok's value as `inspect` renders it, bounded to 60 characters, and whose `value` is the value itself. The message used to be the value's `to_s`, so once `to_s` refuses, `Ok(Some(1)).unwrap_err!` printed only the class name and its `message` raised. A String value is quoted in the message, as `inspect` quotes it
 
 ## [0.9.0] - 2026-09-08
 
