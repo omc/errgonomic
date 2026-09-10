@@ -968,6 +968,26 @@ class BugTest < Minitest::Test
     end
   end
 
+  # A boolean column casts any object that is not false to true, and an
+  # integer column casts one without to_i to nil, so every boundary an
+  # Option is unwrapped at refuses a bare name before a column type sees it.
+  def test_a_bare_variant_name_refuses_a_column_write
+    note = Note.create!(title: 'Bare')
+    [Some, None, Ok, Err].each do |variant|
+      %i[pinned title body meta rank score price due_on read_at].each do |column|
+        assert_raises(Errgonomic::SerializeError, column.to_s) { Note.create!(column => variant) }
+      end
+      %i[pinned title rank].each do |column|
+        assert_raises(Errgonomic::SerializeError) { note.update!(column => variant) }
+        assert_raises(Errgonomic::SerializeError) { Note.update_all(column => variant) }
+        assert_raises(Errgonomic::SerializeError) { Note.insert_all([{ column => variant }]) }
+        assert_raises(Errgonomic::SerializeError) { Note.where(column => variant).to_a }
+        assert_raises(Errgonomic::SerializeError) { Note.where(column => [variant, 1]).to_a }
+        assert_raises(Errgonomic::SerializeError) { Note.find_by(column => variant) }
+      end
+    end
+  end
+
   def test_the_json_gem_alone_refuses_a_bare_variant_name
     out, err, status = run_ruby(<<~CHILD, 'json')
       [Some, None, Ok, Err].each do |variant|
