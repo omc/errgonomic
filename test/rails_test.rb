@@ -923,12 +923,12 @@ class BugTest < Minitest::Test
   def test_an_unmatched_case_in_over_a_wrapper_has_a_message_that_refuses
     error = assert_raises(NoMatchingPatternError) do
       case Some(1)
-      in Errgonomic::Result::Ok, v then v
-      in Errgonomic::Result::Err, e then e
+      in Ok(v) then v
+      in Err(e) then e
       end
     end
     assert_raises(Errgonomic::SerializeError) { error.message }
-    unmatched = 'case Some(1); in Errgonomic::Result::Ok, v then v; in Errgonomic::Result::Err, e then e; end'
+    unmatched = 'case Some(1); in Ok(v) then v; in Err(e) then e; end'
 
     _, printed, = run_ruby(unmatched)
     assert_match(/in '<main>': NoMatchingPatternError$/, printed)
