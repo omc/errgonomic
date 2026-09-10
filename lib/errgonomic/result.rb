@@ -462,13 +462,35 @@ module Errgonomic
       end
 
       # The Rust shape: each variant deconstructs to its one payload, so
-      # `in Ok(v)` binds the value and `in Err(e)` binds the error.
+      # `in Ok(v)` binds the value and `in Err(e)` binds the error. A
+      # value-less Err deconstructs to nothing: the sentinel behind it is
+      # internal and must never bind to a pattern variable.
       #
       # @example
       #   Ok(1).deconstruct # => [1]
       #   Err(:e).deconstruct # => [:e]
-      #   Err().deconstruct # => [Errgonomic::Result::Err::Arbitrary]
+      #   Err().deconstruct # => []
       #   Ok(1).respond_to?(:deconstruct_keys) # => false
+      #
+      # @example a value-less Err matches `in Err` and `in Err()`, never `in Err(e)`
+      #   case Err()
+      #   in Err(e) then e
+      #   in Err then :no_value
+      #   end # => :no_value
+      #   case Err()
+      #   in Err() then :no_value
+      #   end # => :no_value
+      #   case Err(:x)
+      #   in Err(e) then e
+      #   in Err then :no_value
+      #   end # => :x
+      #   begin
+      #     case Err()
+      #     in Err(e) then e
+      #     end
+      #   rescue NoMatchingPatternError => e
+      #     e.class
+      #   end # => NoMatchingPatternError
       #
       # @example a two-branch case/in with no else is exhaustive
       #   case Ok(1)
@@ -499,6 +521,8 @@ module Errgonomic
       #     "Measurement produced an exception -- #{e.class}: #{e}"
       #   end # => "Measurement produced an exception -- StandardError: nope"
       def deconstruct
+        return [] if value.equal?(Err::Arbitrary)
+
         [value]
       end
 
