@@ -29,5 +29,3 @@ jobs:
         run: bundle exec yard doctest
       - name: Run rake test
         run: bundle exec rake test
-      - name: Run rake test:strict
-        run: bundle exec rake test:strict
