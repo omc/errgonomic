@@ -27,6 +27,11 @@ module Errgonomic
       # @!method delegate_optional(*methods, to: nil, prefix: nil, private: nil, allow_nil: nil)
       #   @!scope class
       #   Delegates to an optional target, answering an Option: None where the target is absent.
+      #   A name ending in `?` is the exception: it answers a bare boolean, false for an absent target.
+      #   @example a predicate answers a verdict rather than an Option, since every Option is truthy
+      #     Article.create!(title: 'Omelas', writer: Writer.create!(name: 'Ursula', bio: 'writes')).credited? # => true
+      #     Article.create!(title: 'Omelas', writer: Writer.create!(name: 'Ursula')).credited? # => false
+      #     Article.create!(title: 'Untitled').credited? # => false
       #   @example prefix forms name the reader, as they do for Rails' delegate
       #     article = Article.create!(title: 'Omelas', writer: Writer.create!(name: 'Ursula', bio: 'writes'))
       #     article.writer_name # => Some('Ursula')
@@ -158,9 +163,23 @@ module Errgonomic
         def define_optional_delegation(receiver, method_name, reader, declared_at)
           class_eval <<-RUBY, declared_at.path, declared_at.lineno # rubocop:disable Style/EvalWithLocation
             def #{reader}(...)
-              #{receiver}.to_option.and_then { |target| target.#{method_name}(...).to_option }
+              #{delegation_body(receiver, method_name)}
             end
           RUBY
+        end
+
+        # A ? name asks for a verdict, and an Option is not usable as one:
+        # every Option is truthy, so Some(false) and None both take the true
+        # branch. A predicate therefore answers a bare boolean, reading an
+        # absent target as false, which branches the way nil does.
+        def delegation_body(receiver, method_name)
+          return "#{receiver}.to_option.some_and? { |target| target.#{method_name}(...) }" if predicate?(method_name)
+
+          "#{receiver}.to_option.and_then { |target| target.#{method_name}(...).to_option }"
+        end
+
+        def predicate?(method_name)
+          method_name.to_s.end_with?('?')
         end
 
         # A target named for a Ruby keyword reads as the keyword in the body

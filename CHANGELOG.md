@@ -1,5 +1,18 @@
 ## [Unreleased]
 
+## [0.11.0] - 2026-09-16
+
+This release makes a converted model's query methods and a delegated predicate answer the verdict a boolean caller asked for, rather than something an `if` reads as true.
+
+### Upgrading from 0.10.2
+
+An application that prepended its own `query_attribute` unwrap to work around a wrapped column's `attr?` answering true for `false`, `0` or `""` can delete it: the concern does it now, and a prepended copy is redundant rather than harmful. A `delegate_optional` whose method name ends in `?` returns `true` or `false` where it returned an Option, so `some?`, `unwrap_or` and the other combinators on that result are a `NoMethodError`. Read the boolean instead. The one loss is a `?` method that answers a value by design, which now answers `true`: declare it without the `?`, or write `some_and?` by hand. The seam to watch is `Object#to_option`, which lifts whatever it is handed, so `record.delegated?.to_option` is `Some(false)` for an absent target where it was `None`.
+
+### Changes
+
+- [Bug fix] A converted model's `query_attribute`, its private `attribute?` alias and the `attr?` methods Rails generates from them answer what the unconverted model answers for a wrapped column, so `note.pinned?` is `false` for an explicit `false` and `note.rank?` is `false` for a `0`. The concern overrides `query_attribute` to unwrap the reader's Option before handing the value to Rails' own cast. Previously the cast saw a `Some`, missed its `true` and `false, nil` arms and fell through to `!blank?`, where `Option#blank?` is `none?`, so every present value answered true ([#88](https://github.com/omc/errgonomic/issues/88))
+- [Behavior change] `delegate_optional` with a method name ending in `?` answers `true` or `false` through `some_and?`, reading an absent target as `false`, where it answered `Some(true)`, `Some(false)` and `None` before. A `?` name asks for a verdict and no Option can serve as one, because every Option is truthy: `Some(false)` and `None` both took the true branch of an `if`, which is the silent wrong branch that `delegate ..., allow_nil: true` does not have. Every other name is lifted into an Option as before, and there is no opt-out keyword ([#89](https://github.com/omc/errgonomic/issues/89))
+
 ## [0.10.2] - 2026-09-10
 
 This release makes every `Err` carry an error and removes `Option#ok`, the one method that built an `Err` without one.

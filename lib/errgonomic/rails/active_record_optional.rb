@@ -38,10 +38,12 @@ module Errgonomic
     #    Validation unwraps at read_attribute_for_validation, the seam every
     #    EachValidator fetches an attribute through; serialization at
     #    read_attribute_for_serialization, the seam every attribute in a
-    #    payload is fetched through; and a form helper at ActionView's tag
-    #    value, the seam every field reads its record through. So a standard
-    #    validator weighs the value, a payload carries it and a form renders
-    #    it, rather than the wrapper. A singular association with nested
+    #    payload is fetched through; a form helper at ActionView's tag
+    #    value, the seam every field reads its record through; and a query
+    #    method at query_attribute, the seam every generated attr? is cast
+    #    through. So a standard validator weighs the value, a payload carries
+    #    it, a form renders it and a query method answers for it, rather than
+    #    for the wrapper. A singular association with nested
     #    attributes goes further and keeps its plain reader: nested attributes
     #    are assigned through the reader, and ActiveRecord asks whatever it
     #    finds there whether it is a new record. So does a reader a framework
@@ -114,6 +116,29 @@ module Errgonomic
         end
         errgonomic_omit_absent_keys(hash)
       end
+
+      # A query method reads the record through the public reader and matches
+      # what it finds against true, then false and nil, before falling through
+      # to blankness. An Option is none of those, and its blankness is its
+      # discriminant rather than its value, so an explicit false and a stored
+      # zero would answer true. Unwrapping the read is what keeps the answer
+      # the one an unconverted model gives.
+      #
+      # @example
+      #   Note.new(pinned: false).pinned? # => false
+      #   Note.new(rank: 0).rank? # => false
+      #   Note.new(title: '').title? # => false
+      #   Note.new(pinned: true).pinned? # => true
+      #   Note.new(rank: 3).rank? # => true
+      def query_attribute(attr_name)
+        query_cast_attribute(attr_name, Errgonomic::Rails.unwrap_option(public_send(attr_name)))
+      end
+
+      # Rails copies query_attribute into attribute? at the alias, and the
+      # attr? methods it generates call that copy, so an override of the one
+      # never reaches them.
+      alias attribute? query_attribute
+      private :attribute?
 
       # YARD does not see through a concern's class_methods block, so the
       # method it documents is declared rather than read.

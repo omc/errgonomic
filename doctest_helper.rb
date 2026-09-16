@@ -76,6 +76,10 @@ class Writer < ActiveRecord::Base
   def styled_name
     yield(name)
   end
+
+  def credited?
+    !bio.nil?
+  end
 end
 
 # A converted model reads its association as an Option.
@@ -86,6 +90,7 @@ class Article < ActiveRecord::Base
   delegate_optional :name, to: :writer, prefix: :author
   delegate_optional :bio, to: :writer
   delegate_optional :greeting, :styled_name, to: :writer, prefix: true
+  delegate_optional :credited?, to: :writer
   delegate_optional :table_name, to: :class
 end
 
