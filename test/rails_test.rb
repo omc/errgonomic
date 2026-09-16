@@ -549,6 +549,14 @@ class PlainNote < ActiveRecord::Base
   self.table_name = 'notes'
 end
 
+# One column left unwrapped, so the seams a wrapped reader passes through can
+# be asked what they answer for a plain value on a converted model.
+class PartlyPlainNote < ActiveRecord::Base
+  self.table_name = 'notes'
+  errgonomic_optional_except :score
+  include Errgonomic::Rails::ActiveRecordOptional
+end
+
 # A string primary key, where find casting an id it was handed raw fails
 # outright rather than coercing the wrapper down a soft-deprecated path.
 class Tag < ActiveRecord::Base
@@ -1343,6 +1351,43 @@ class BugTest < Minitest::Test
 
     [written.id, unwritten.id].each do |id|
       assert_equal render_note_form(PlainNote.find(id)), render_note_form(Note.find(id))
+    end
+  end
+
+  # A query method reads the record through the public reader and matches
+  # what it finds against true, then false and nil, before falling through to
+  # blankness. An Option is none of those, and its blankness is its
+  # discriminant rather than its value, so an explicit false and a stored zero
+  # would answer true where the unconverted twin answers false.
+  def test_a_generated_query_method_answers_what_the_unconverted_model_answers
+    each_queried_value do |name, value|
+      assert_equal PlainNote.new(name => value).public_send(:"#{name}?"),
+                   Note.new(name => value).public_send(:"#{name}?"),
+                   "#{name}? for #{value.inspect}"
+    end
+  end
+
+  # Rails copies query_attribute into the private attribute? at the alias, and
+  # the generated methods call that copy, so an override has to reach both.
+  def test_query_attribute_and_its_private_alias_answer_what_the_unconverted_model_answers
+    each_queried_value do |name, value|
+      expected = PlainNote.new(name => value).query_attribute(name)
+      note = Note.new(name => value)
+
+      assert_equal expected, note.query_attribute(name), "query_attribute(#{name.inspect}) for #{value.inspect}"
+      assert_equal expected, note.send(:attribute?, name), "attribute?(#{name.inspect}) for #{value.inspect}"
+    end
+  end
+
+  # An opted-out column reads as a plain value on a converted model, so the
+  # query methods have nothing to unwrap and answer as they always did.
+  def test_an_opted_out_column_answers_the_query_methods_unchanged
+    [0.0, 1.5, nil].each do |value|
+      expected = PlainNote.new(score: value).query_attribute(:score)
+      note = PartlyPlainNote.new(score: value)
+
+      assert_equal expected, note.score?, "score? for #{value.inspect}"
+      assert_equal expected, note.query_attribute(:score), "query_attribute(:score) for #{value.inspect}"
     end
   end
 
@@ -2392,6 +2437,16 @@ class BugTest < Minitest::Test
   end
 
   private
+
+  # One nullable column per arm of ActiveRecord's query cast: a boolean it
+  # matches outright, a number it asks for zero, a string it weighs for
+  # blankness. Each value is one an unconverted model answers false for, one
+  # it answers true for, and absence.
+  def each_queried_value
+    { pinned: [false, true, nil], rank: [0, 3, nil], title: ['', 'Wanderer', nil] }.each do |name, values|
+      values.each { |value| yield name, value }
+    end
+  end
 
   def declare_serialize_none(mode, **scope)
     Class.new(ActiveRecord::Base) do
