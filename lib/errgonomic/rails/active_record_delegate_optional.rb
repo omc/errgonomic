@@ -27,6 +27,11 @@ module Errgonomic
       # @!method delegate_optional(*methods, to: nil, prefix: nil, private: nil, allow_nil: nil)
       #   @!scope class
       #   Delegates to an optional target, answering an Option: None where the target is absent.
+      #   A name ending in `?` is the exception: it answers a bare boolean, false for an absent target.
+      #   @example a predicate answers a verdict rather than an Option, since every Option is truthy
+      #     Article.create!(title: 'Omelas', writer: Writer.create!(name: 'Ursula', bio: 'writes')).credited? # => true
+      #     Article.create!(title: 'Omelas', writer: Writer.create!(name: 'Ursula')).credited? # => false
+      #     Article.create!(title: 'Untitled').credited? # => false
       #   @example prefix forms name the reader, as they do for Rails' delegate
       #     article = Article.create!(title: 'Omelas', writer: Writer.create!(name: 'Ursula', bio: 'writes'))
       #     article.writer_name # => Some('Ursula')
