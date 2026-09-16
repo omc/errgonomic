@@ -176,6 +176,16 @@ ActiveRecord::Schema.define do
     t.datetime :read_at
     t.timestamps
   end
+
+  create_table 'probe_tiers', force: :cascade do |t|
+    t.boolean :enterprise
+    t.string :headline
+    t.string :features
+  end
+
+  create_table 'probe_accounts', force: :cascade do |t|
+    t.references :probe_tier
+  end
 end
 
 ActiveRecord::Encryption.configure(
@@ -302,6 +312,40 @@ class Bulletin < ActiveRecord::Base
   self.table_name = 'books'
   belongs_to :author, class_name: 'Chronicler', optional: true
   delegate_optional :name, to: :author, prefix: true
+end
+
+# A delegation target whose predicates answer every shape a predicate can
+# answer, including the ones a boolean column cannot: nil, a String, and a
+# raise. The bare readers stand beside them as the non-predicate control.
+class ProbeTier < ActiveRecord::Base
+  self.table_name = 'probe_tiers'
+
+  # The column is nullable, so this is true, false or nil.
+  def enterprise? = enterprise
+
+  # A ? method that answers a value rather than a verdict.
+  def headline? = headline
+
+  def includes?(feature) = features.to_s.split(',').include?(feature.to_s)
+
+  def boom? = raise(ArgumentError, 'boom')
+end
+
+class ProbeAccount < ActiveRecord::Base
+  self.table_name = 'probe_accounts'
+  belongs_to :probe_tier, optional: true
+  include Errgonomic::Rails::ActiveRecordOptional
+  delegate_optional :enterprise?, :headline?, :includes?, :boom?, to: :probe_tier
+  delegate_optional :headline, to: :probe_tier
+  delegate_optional :persisted?, :valid?, to: :probe_tier, prefix: true
+end
+
+# The contract delegate_optional is a swap for, on a model that is not
+# converted, so the two answers for the same shape sit side by side.
+class PlainProbeAccount < ActiveRecord::Base
+  self.table_name = 'probe_accounts'
+  belongs_to :probe_tier, optional: true
+  delegate :enterprise?, :headline?, :includes?, :boom?, :headline, to: :probe_tier, allow_nil: true
 end
 
 # A buggy layer that re-enters the attribute reader from beneath it: the
@@ -1429,6 +1473,74 @@ class BugTest < Minitest::Test
     author = LoopyAuthor.create!(name: 'Cixin Liu', bio: 'writes sci-fi')
     error = assert_raises(Errgonomic::RecursiveOptionalReadError) { author.bio }
     assert_match(/bio/, error.message)
+  end
+
+  # A predicate is asked for a verdict, and a verdict has to be usable as
+  # one: an Option is always truthy, so Some(false) and None both take the
+  # true branch of an `if`. A delegated ? method answers a bare boolean, the
+  # way the Rails delegation it is a swap for does.
+  def test_a_delegated_predicate_answers_a_bare_boolean
+    yes = ProbeTier.create!(enterprise: true)
+    no = ProbeTier.create!(enterprise: false)
+    unset = ProbeTier.create!
+
+    assert_equal true, ProbeAccount.new(probe_tier: yes).enterprise?
+    assert_equal false, ProbeAccount.new(probe_tier: no).enterprise?
+    assert_equal false, ProbeAccount.new(probe_tier: unset).enterprise?
+    assert_equal false, ProbeAccount.new.enterprise?
+  end
+
+  # The same declaration on an unconverted model, so the swap is visible.
+  # Rails answers nil for an absent target where this answers false; both
+  # are falsey, so no `if` changes branch.
+  def test_a_delegated_predicate_branches_the_way_rails_delegate_branches
+    [ProbeTier.create!(enterprise: true), ProbeTier.create!(enterprise: false), ProbeTier.create!, nil].each do |tier|
+      converted = ProbeAccount.new(probe_tier: tier).enterprise? ? :then : :else
+      plain = PlainProbeAccount.new(probe_tier: tier).enterprise? ? :then : :else
+
+      assert_equal plain, converted, "branched differently for #{tier.inspect}"
+    end
+  end
+
+  # A bare reader beside the predicate: only the ? name is special-cased.
+  def test_a_delegated_reader_still_answers_an_option
+    tier = ProbeTier.create!(headline: 'Big News')
+
+    assert_equal Some('Big News'), ProbeAccount.new(probe_tier: tier).headline
+    assert ProbeAccount.new.headline.none?
+  end
+
+  # A predicate that takes an argument is still a predicate.
+  def test_a_delegated_predicate_forwards_its_arguments
+    tier = ProbeTier.create!(features: 'sso,audit')
+
+    assert_equal true, ProbeAccount.new(probe_tier: tier).includes?('sso')
+    assert_equal false, ProbeAccount.new(probe_tier: tier).includes?('scim')
+    assert_equal false, ProbeAccount.new.includes?('sso')
+  end
+
+  # An absent target answers false without calling anything, so a method
+  # that raises raises only where it is reached.
+  def test_a_delegated_predicate_raises_only_when_the_target_is_there
+    assert_raises(ArgumentError) { ProbeAccount.new(probe_tier: ProbeTier.create!).boom? }
+    assert_equal false, ProbeAccount.new.boom?
+  end
+
+  # A ? method answering a value rather than a verdict is read as a verdict:
+  # the value is tested for truth and does not survive the delegation.
+  def test_a_delegated_predicate_answering_a_value_answers_its_truth
+    assert_equal true, ProbeAccount.new(probe_tier: ProbeTier.create!(headline: 'Big News')).headline?
+    assert_equal true, ProbeAccount.new(probe_tier: ProbeTier.create!(headline: '')).headline?
+    assert_equal false, ProbeAccount.new(probe_tier: ProbeTier.create!).headline?
+  end
+
+  # Rails' own predicates delegate on the same terms as any other.
+  def test_rails_own_predicates_delegate_as_predicates
+    account = ProbeAccount.new(probe_tier: ProbeTier.create!)
+
+    assert_equal true, account.probe_tier_persisted?
+    assert_equal true, account.probe_tier_valid?
+    assert_equal false, ProbeAccount.new.probe_tier_persisted?
   end
 
   def test_private_delegate_optional
